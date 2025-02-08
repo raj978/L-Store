@@ -1,6 +1,7 @@
-from lstore.table import Table, Record, PageRange # imported PageRange class
+from lstore.table import Table, Record, Page, PageRange # imported Page class and PageRange class
 from lstore.index import Index
 
+from lstore.config import MAX_PAGES # import MAX_PAGES constant
 
 class Query:
     """
@@ -34,21 +35,38 @@ class Query:
 
         # if table is full then return False
         
-        # make a new record
-        record: Record = Record(self.table.current_rid, self.table.current_key, columns[0])
-        
-        # increment rid for the next record
-        self.table.current_rid += 1
+        # make a new record for each column that is passed in
+        for column in columns:
+            # make a new record
+            record: Record = Record(self.table.current_rid, self.table.current_key, column)
+            
+            # increment rid for the next record
+            self.table.current_rid += 1
 
-        # check if there is a page range that has capacity
-        page_range_index: int = self.table.get_nonempty_page_range()
+            # check if there is a page range that has capacity
+            page_range_index: int = self.table.get_nonempty_page_range()
 
-        # if page_range_index is the largest page index plus one then there is no nonempty page range so make a new page range
-        if page_range_index == len(self.table.page_ranges):
-            self.table.append_page_range(page_range_index)
+            # if page_range_index is the largest page index plus one 
+            # then there is no nonempty page range or a page range does not exist so make a new page range
+            if page_range_index == len(self.table.page_ranges):
+                self.table.append_page_range()
 
-        # insert record into a nonempty base page
-        current_page_range: PageRange = self.table.page_ranges[page_range_index]
+            # select page_range to insert into
+            page_range: PageRange = self.table.page_ranges[page_range_index]
+
+            # check if there is enough base pages for the record in that page_range
+            # the record can span multiple base pages in a page_range
+            base_page_indices: list[int] = page_range.get_nonempty_base_pages()
+
+            for base_page_index in base_page_indices:
+                if base_page_index == len(page_range): # there is no nonempty base page or the base page does not exist
+                    # make a new base page
+                    page_range.append_base_page()
+
+                # append the values to the first nonempty row in the base pages
+                for value in column:
+                    pass
+
 
     
     """

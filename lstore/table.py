@@ -2,14 +2,7 @@ from lstore.index import Index
 from time import time
 
 from lstore.page import Page # import Page class
-
-INDIRECTION_COLUMN = 0
-RID_COLUMN = 1
-TIMESTAMP_COLUMN = 2
-SCHEMA_ENCODING_COLUMN = 3
-
-MAX_PAGES = 16 # max number of pages in a page range
-RECORD_DELETED = -1 # special value for deleted records
+from lstore.config import INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, MAX_PAGES, RECORD_DELETED # import constants
 
 class Record:
 
@@ -57,10 +50,13 @@ class PageRange:
                 self.has_capacity = False
         self.has_capacity = True
 
-    def get_nonempty_base_page(self):
+    def get_nonempty_base_pages(self):
         pass
 
-    def get_nonempty_tail_page(self):
+    def append_base_page(self):
+        pass
+
+    def get_nonempty_tail_pages(self):
         pass
 
     def append_tail_page(self):
@@ -107,6 +103,7 @@ class Table:
     """
     # Makes a new page range
     """
-    def append_page_range(self, page_range_index) -> None:
-        self.page_ranges[page_range_index] = PageRange()
+    def append_page_range(self) -> None:
+        # length of page_ranges is largest page index plus one
+        self.page_ranges[len(self.page_ranges)] = PageRange()
         

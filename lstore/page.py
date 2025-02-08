@@ -1,11 +1,13 @@
-
-MAX_COLUMN_SIZE = 512
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE # import constants
 
 class Page:
 
     def __init__(self):
         self.num_records = 0
-        self.data = bytearray(4096)
+        self.data = bytearray(MAX_PAGE_SIZE)
+
+        self.max_columns = MAX_PAGE_SIZE / MAX_COLUMN_SIZE # max columns in a page
+
         """
         # what column to write to
         # reset current_column to 0 if current row is full
@@ -18,5 +20,8 @@ class Page:
 
     def write(self, value):
         self.num_records += 1
+        pass
+
+    def row_is_full():
         pass
 

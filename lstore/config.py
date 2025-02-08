@@ -1,0 +1,9 @@
+INDIRECTION_COLUMN = 0
+RID_COLUMN = 1
+TIMESTAMP_COLUMN = 2
+SCHEMA_ENCODING_COLUMN = 3
+
+MAX_PAGES = 16 # max number of pages in a page range
+RECORD_DELETED = -1 # special value for deleted records
+MAX_PAGE_SIZE = 4096
+MAX_COLUMN_SIZE = 512
