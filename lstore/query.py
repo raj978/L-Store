@@ -1,4 +1,4 @@
-from lstore.table import Table, Record
+from lstore.table import Table, Record, PageRange # imported PageRange class
 from lstore.index import Index
 
 
@@ -22,16 +22,33 @@ class Query:
     """
     def delete(self, primary_key):
         pass
-    
-    
+
     """
     # Insert a record with specified columns
     # Return True upon succesful insertion
     # Returns False if insert fails for whatever reason
     """
     def insert(self, *columns):
+        # turn schema encoding into a decimal to store it and then convert it back to binary
         schema_encoding = '0' * self.table.num_columns
-        pass
+
+        # if table is full then return False
+        
+        # make a new record
+        record: Record = Record(self.table.current_rid, self.table.current_key, columns[0])
+        
+        # increment rid for the next record
+        self.table.current_rid += 1
+
+        # check if there is a page range that has capacity
+        page_range_index: int = self.table.get_nonempty_page_range()
+
+        # if page_range_index is the largest page index plus one then there is no nonempty page range so make a new page range
+        if page_range_index == len(self.table.page_ranges):
+            self.table.append_page_range(page_range_index)
+
+        # insert record into a nonempty base page
+        current_page_range: PageRange = self.table.page_ranges[page_range_index]
 
     
     """
