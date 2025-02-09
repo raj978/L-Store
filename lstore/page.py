@@ -1,4 +1,4 @@
-from lstore.table import Table, Entry # import Table class and Entry class
+# from lstore.table import Table, Entry # import Table class and Entry class
 from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, KEY_COLUMN, NUM_SPECIFIED_COLUMNS # import constants
 
 from time import time
@@ -30,7 +30,7 @@ class Page:
     def decimal_to_binary(number: int) -> str:
         pass
 
-    def write(self, table: Table, indirection: int, schema_encoding: str, key, page_range_index: int, page_index: int, values):
+    def write(self, table, indirection: int, schema_encoding: str, key, page_range_index: int, page_index: int, values):
 
         # insert specified columns
         self.data[INDIRECTION_COLUMN + self.num_records] = indirection # insert indirection

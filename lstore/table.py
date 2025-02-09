@@ -60,11 +60,14 @@ class PageRange:
     # Returns the largest page range index plus one if there is no nonempty base page
     """
     def get_nonempty_base_pages(self) -> list[int]:
+        base_page_indices: list[int] = []
         for page_index in self.pages:
             current_page: Page = self.pages[page_index]
             if current_page.has_capacity:
-                return page_index
-        return len(self.pages)
+                base_page_indices.append(page_index)
+            else:
+                base_page_indices.append(len(self.pages))
+        return base_page_indices
 
     """
     # Appends a base page given an index
@@ -95,9 +98,10 @@ class Table:
         self.num_columns = num_columns
         self.page_directory: dict[int : list[Entry]] = {}
         self.index = Index(self)
-
+        
         self.start_time = time() # record start time
 
+        self.current_rid = 0
         """
         # a table has a set of page ranges
         # page_ranges = {page_range_index : PageRange object}

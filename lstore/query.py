@@ -90,7 +90,7 @@ class Query:
             # get list of smaller columns based on the current column
             divided_columns = self._get_divided_columns(columns)
 
-            for index in len(range(base_page_indices)):
+            for index in range(len(base_page_indices)):
                 base_page_index: int = base_page_indices[index]
                 if base_page_index == len(page_range): # there is no nonempty base page or the base page does not exist
                     # make a new base page
