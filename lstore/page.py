@@ -34,7 +34,7 @@ class Page:
 
         # insert specified columns
         self.data[INDIRECTION_COLUMN + self.num_records] = indirection # insert indirection
-        self.data[RID_COLUMN + self.num_records] = self.num_records # insert RID
+        self.data[RID_COLUMN + self.num_records] = table.current_rid # insert RID
         self.data[TIMESTAMP_COLUMN + self.num_records] = time() - table.start_time() # timestamp is the current time minus the start time of when the table is initialized
         schema_encoding = self._binary_to_decimal(schema_encoding) # convert schema encoding to number
         self.data[SCHEMA_ENCODING_COLUMN + self.num_records] = schema_encoding # insert schema encoding
@@ -46,6 +46,11 @@ class Page:
             self.data[NUM_SPECIFIED_COLUMNS + column_index + self.num_records] = current_value
             # update page directory
             entry: Entry = Entry(page_range_index, page_index, column_index, self.num_records)
-            table.page_directory[self.num_records] = entry
+
+            # check if key is already in page directory
+            if table.current_rid in table.page_directory:
+                table.page_directory[self.num_records].append(entry)
+            else:
+                table.page_directory[self.num_records] = entry
 
         self.num_records += 1

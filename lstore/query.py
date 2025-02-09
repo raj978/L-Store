@@ -22,8 +22,9 @@ class Query:
     def _get_divided_columns(self, column):
         smaller_columns = []
         smaller_column = []
+        max_data_columns: int = (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS
         for value in column:
-            if len(smaller_column) == (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS:
+            if len(smaller_column) == max_data_columns:
                 # smaller column has reached max size so append it
                 smaller_columns.append(smaller_column)
                 smaller_column = []
@@ -98,7 +99,10 @@ class Query:
                 # append the values to the base page
                 current_base_page: Page = page_range[base_page_index]
                 smaller_column = divided_columns[index]
-                current_base_page.write(self.table, LATEST_RECORD, schema_encoding, key, smaller_column)
+                current_base_page.write(self.table.current_rid, LATEST_RECORD, schema_encoding, key, smaller_column)
+
+            # increment rid
+            self.table.current_rid += 1
 
     
     """
@@ -152,6 +156,9 @@ class Query:
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns):
+        # always update latest version of a record
+        
+
         pass
 
     
