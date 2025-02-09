@@ -1,7 +1,7 @@
 from lstore.table import Table, Record, Page, PageRange, Entry # imported Page class, PageRange class, and Entry class
 from lstore.index import Index
 
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD # import constants
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN# import constants
 
 class Query:
     """
@@ -39,7 +39,21 @@ class Query:
     # Return False if record doesn't exist or is locked due to 2PL
     """
     def delete(self, primary_key):
-        pass
+
+        entries: list[Entry] = self.table.page_directory[primary_key]
+        # get number of indirections
+        num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
+        num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
+
+        for index in range(num_indirections):
+            while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
+                rid = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
+                self.table.set_value(entries[RID_COLUMN], RECORD_DELETED) # set rid to invalid
+                self.table.set_value(entries[INDIRECTION_COLUMN], RECORD_DELETED) # set indirection to invalid
+                entries = self.table.page_directory[rid]
+        
+        # update the page directory
+        del self.table.page_directory[primary_key]
 
     """
     # Insert a record with specified columns

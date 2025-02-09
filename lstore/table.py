@@ -45,11 +45,15 @@ class PageRange:
     # sets has_capacity to False if page range is not full
     """
     def is_full(self) -> None:
+        num_base_pages_full: int = 0
         for page_index in self.pages:
             current_page: Page = self.pages[page_index]
-            if current_page.has_capacity():
-                self.has_capacity = False
-        self.has_capacity = True
+            if page_index < MAX_BASE_PAGES and not current_page.has_capacity():
+                num_base_pages_full += 1
+        if num_base_pages_full >= MAX_BASE_PAGES:
+            self.has_capacity = False
+        else:
+            self.has_capacity = True
 
     """
     # Returns the indices of a nonempty base pages
@@ -132,11 +136,19 @@ class Table:
         desired_cell = entry.cell_index
         desired_val = desired_page.data[self._make_offset(desired_col, desired_cell)]
         return desired_val
+    
+    def set_value(self, entry: Entry, value):
+        desired_page_range: PageRange = self.table.page_ranges[entry.page_range_index]
+        desired_page: Page = desired_page_range.pages[entry.page_index]
+        desired_col = entry.column_index
+        desired_cell = entry.cell_index
+        desired_page.data[self.table._make_offset(desired_col, desired_cell)] = value
 
     def get_record(self, rid: int, entries: list[Entry], projected_columns_index) -> Record:
         record: Record = Record(rid, None, [])
         for entry_index in len(range(entries)):
-            if entry_index >= NUM_SPECIFIED_COLUMNS and projected_columns_index[entry_index] != 0:
+            entry: Entry = entries[entry_index]
+            if entry.column_index >= NUM_SPECIFIED_COLUMNS and projected_columns_index[entry_index] != 0:
                 current_entry: Entry = entries[entry_index]
                 value = self.get_value(current_entry)
                 record.columns.append(value)
@@ -145,7 +157,7 @@ class Table:
     def get_version(self, rid):
         version: int = 0
         entries: list[Entry] = self.page_directory[rid]
-        while entries[INDIRECTION_COLUMN] != LATEST_RECORD:
+        while self.get_value(entries[INDIRECTION_COLUMN]) != LATEST_RECORD:
             entries: list[Entry] = self.page_directory[rid]
             version -= 1
         return version
