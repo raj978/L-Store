@@ -1,7 +1,7 @@
-from lstore.table import Table, Record, Page, PageRange # imported Page class and PageRange class
+from lstore.table import Table, Record, Page, PageRange, Entry # imported Page class, PageRange class, and Entry class
 from lstore.index import Index
 
-from lstore.config import MAX_PAGES # import MAX_PAGES constant
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD # import constants
 
 class Query:
     """
@@ -14,6 +14,23 @@ class Query:
         self.table = table
         pass
 
+
+    """
+    # Divides a column into a list of smaller columns so they can fit into one base page
+    # Returns a list of smaller columns
+    """
+    def _get_divided_columns(self, column):
+        smaller_columns = []
+        smaller_column = []
+        for value in column:
+            if len(smaller_column) == (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS:
+                # smaller column has reached max size so append it
+                smaller_columns.append(smaller_column)
+                smaller_column = []
+            smaller_column.append(value)
+        if len(smaller_column) != 0:
+            smaller_columns.append(smaller_column)
+        return smaller_columns
     
     """
     # internal Method
@@ -35,13 +52,10 @@ class Query:
 
         # if table is full then return False
         
-        # make a new record for each column that is passed in
-        for column in columns:
-            # make a new record
-            record: Record = Record(self.table.current_rid, self.table.current_key, column)
-            
-            # increment rid for the next record
-            self.table.current_rid += 1
+        key: int = columns[KEY_INDEX]
+
+        # make a new record for each record passed in
+        for index in range(len(columns)):
 
             # check if there is a page range that has capacity
             page_range_index: int = self.table.get_nonempty_page_range()
@@ -58,15 +72,19 @@ class Query:
             # the record can span multiple base pages in a page_range
             base_page_indices: list[int] = page_range.get_nonempty_base_pages()
 
-            for base_page_index in base_page_indices:
+            # get list of smaller columns based on the current column
+            divided_columns = self._get_divided_columns(columns)
+
+            for index in len(range(base_page_indices)):
+                base_page_index: int = base_page_indices[index]
                 if base_page_index == len(page_range): # there is no nonempty base page or the base page does not exist
                     # make a new base page
-                    page_range.append_base_page()
+                    page_range.append_base_page(base_page_index)
 
-                # append the values to the first nonempty row in the base pages
-                for value in column:
-                    pass
-
+                # append the values to the base page
+                current_base_page: Page = page_range[base_page_index]
+                smaller_column = divided_columns[index]
+                current_base_page.write(self.table, LATEST_RECORD, schema_encoding, key, smaller_column)
 
     
     """
@@ -79,7 +97,19 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select(self, search_key, search_key_index, projected_columns_index):
-        pass
+        records: list[Record] = []
+        # records can span multiple base pages so split projected columns
+        smaller_projected_columns_index = self._get_divided_columns(projected_columns_index)
+        # index of smaller projected columns
+        current_smaller_projected_columns: int = 0
+        for rid in self.table.page_directory:
+            entries: list[Entry] = self.table.page_directory[rid]
+            for entry in entries:
+                if search_key == entry.cell_index and search_key_index == entry.column_index:
+                    record = self.table.get_record(entries, smaller_projected_columns_index[current_smaller_projected_columns])
+                    current_smaller_projected_columns += 1
+                    records.append(record)
+        return records
 
     
     """
@@ -93,7 +123,13 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-        pass
+        records = self.select(search_key, search_key_index, projected_columns_index)
+        records_with_correct_version = []
+        for record in records:
+            version = self.table.get_version(record.rid)
+            if version >= relative_version:
+                records_with_correct_version.append(record)
+        return records_with_correct_version
 
     
     """

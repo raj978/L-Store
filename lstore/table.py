@@ -2,7 +2,7 @@ from lstore.index import Index
 from time import time
 
 from lstore.page import Page # import Page class
-from lstore.config import INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, MAX_PAGES, RECORD_DELETED # import constants
+from lstore.config import MAX_BASE_PAGES, NUM_SPECIFIED_COLUMNS, MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, LATEST_RECORD# import constants
 
 class Record:
 
@@ -37,6 +37,7 @@ class PageRange:
         self.pages: dict[int : Page] = {}
 
         self.has_capacity = False # checks if the page range has capacity
+        self.num_tail_pages = 0 # keeps track of number of tail pages
 
     """
     # Checks if a page range is full
@@ -50,17 +51,32 @@ class PageRange:
                 self.has_capacity = False
         self.has_capacity = True
 
-    def get_nonempty_base_pages(self):
-        pass
+    """
+    # Returns the indices of a nonempty base pages
+    # Returns the largest page range index plus one if there is no nonempty base page
+    """
+    def get_nonempty_base_pages(self) -> list[int]:
+        for page_index in self.pages:
+            current_page: Page = self.pages[page_index]
+            if current_page.has_capacity:
+                return page_index
+        return len(self.pages)
 
-    def append_base_page(self):
-        pass
+    """
+    # Appends a base page given an index
+    """
+    def append_base_page(self, base_page_index: int) -> None:
+        self.pages[base_page_index] = Page()
 
     def get_nonempty_tail_pages(self):
         pass
 
-    def append_tail_page(self):
-        pass
+    """
+    # Appends a tail page given an index
+    """
+    def append_tail_page(self) -> None:
+        self.pages[MAX_BASE_PAGES + self.num_tail_pages] = Page()
+        self.num_tail_pages += 1
     
 class Table:
 
@@ -76,8 +92,7 @@ class Table:
         self.page_directory: dict[int : list[Entry]] = {}
         self.index = Index(self)
 
-        # used for assigning rid to new records
-        self.current_rid: int = 0
+        self.start_time = time() # record start time
 
         """
         # a table has a set of page ranges
@@ -94,10 +109,10 @@ class Table:
     # Returns the largest page range index plus one if there is no nonempty page range
     """
     def get_nonempty_page_range(self) -> int:
-        for page_index in self.page_ranges:
-            current_page_range: PageRange = self.page_ranges[page_index]
+        for page_range_index in self.page_ranges:
+            current_page_range: PageRange = self.page_ranges[page_range_index]
             if current_page_range.has_capacity:
-                return page_index
+                return page_range_index
         return len(self.page_ranges)
 
     """
@@ -106,4 +121,31 @@ class Table:
     def append_page_range(self) -> None:
         # length of page_ranges is largest page index plus one
         self.page_ranges[len(self.page_ranges)] = PageRange()
-        
+    
+    def _make_offset(col: int, cell: int):
+        return cell * (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) + col
+
+    def get_value(self, entry: Entry):
+        desired_page_range: PageRange = self.page_ranges[entry.page_range_index]
+        desired_page: Page = desired_page_range.pages[entry.page_index]
+        desired_col = entry.column_index
+        desired_cell = entry.cell_index
+        desired_val = desired_page.data[self._make_offset(desired_col, desired_cell)]
+        return desired_val
+
+    def get_record(self, rid: int, entries: list[Entry], projected_columns_index) -> Record:
+        record: Record = Record(rid, None, [])
+        for entry_index in len(range(entries)):
+            if entry_index >= NUM_SPECIFIED_COLUMNS and projected_columns_index[entry_index] != 0:
+                current_entry: Entry = entries[entry_index]
+                value = self.get_value(current_entry)
+                record.columns.append(value)
+        return record
+    
+    def get_version(self, rid):
+        version: int = 0
+        entries: list[Entry] = self.page_directory[rid]
+        while entries[INDIRECTION_COLUMN] != LATEST_RECORD:
+            entries: list[Entry] = self.page_directory[rid]
+            version -= 1
+        return version
