@@ -1,7 +1,7 @@
 from lstore.table import Table, Record, Page, PageRange # imported Page class, PageRange class, and Entry class
 from lstore.index import Index, Entry
 
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN # import constants
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN, MAX_BASE_PAGES # import constants
 
 class Query:
     """
@@ -19,12 +19,11 @@ class Query:
     # Divides a column into a list of smaller columns so they can fit into one base page
     # Returns a list of smaller columns
     """
-    def _get_divided_columns(self, column):
+    def _get_divided_columns(self, column, max_size):
         smaller_columns = []
         smaller_column = []
-        max_data_columns: int = (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS
         for value in column:
-            if len(smaller_column) == max_data_columns:
+            if len(smaller_column) == max_size:
                 # smaller column has reached max size so append it
                 smaller_columns.append(smaller_column)
                 smaller_column = []
@@ -32,6 +31,12 @@ class Query:
         if len(smaller_column) != 0:
             smaller_columns.append(smaller_column)
         return smaller_columns
+    
+    """
+    # Returns the number of pages needed for however many columns there are
+    """
+    def _get_pages_needed(self, num_columns, max_size) -> int:
+        return (num_columns // max_size) + 1 # this is to ceiling the value
     
     """
     # internal Method
@@ -63,50 +68,46 @@ class Query:
     """
     def insert(self, *columns):
         # turn schema encoding into a decimal to store it and then convert it back to binary
-        max_data_columns: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
-        schema_encoding = '0' * max_data_columns
+        schema_encoding = '0' * self.table.num_columns
 
         # if table is full then return False
+
+        key = columns[KEY_INDEX] # get key
+        columns = columns[0:KEY_INDEX] + columns[KEY_INDEX + 1:len(columns)] # remove key from columns
+
+        # split values
+        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
+        divided_columns = self._get_divided_columns(columns, max_size)
+
+        # check if there is a page range that has capacity
+        page_range_index: int = self.table.get_nonempty_page_range()
+
+        # append page range it is full or does not exist
+        if page_range_index == len(self.table.page_ranges):
+            self.table.append_page_range()
+
+        page_range: PageRange = self.table.page_ranges[page_range_index]
+
+        # check if there is enough base pages for the record in that page_range
+        # the record can span multiple base pages in a page_range
+        num_base_pages_needed = self._get_pages_needed(len(columns))
+        base_page_indices = []
+        for index in range(num_base_pages_needed):
+            base_page_indices.append(page_range.get_nonempty_base_pages())
+            current_base_page_index = base_page_indices[index]
+            if current_base_page_index == len(page_range.pages):
+                 # append base pages it is full or does not exist
+                 page_range.append_base_page(base_page_indices[index])
+
+        # for each base page, insert values
+        for index in range(len(base_page_indices)):
+            current_base_page_index: int = base_page_indices[index]
+            current_base_page: Page = page_range.pages[current_base_page_index]
+            current_values = divided_columns[index]
+            current_base_page.write(self.table, LATEST_RECORD, schema_encoding, key, page_range_index, current_base_page_index, current_values)
         
-        key: int = columns[KEY_INDEX]
-
-        columns = columns[0:KEY_INDEX] + columns[KEY_INDEX + 1:len(columns)] # skip key
-
-        # make a new record for each record passed in
-        for index in range(len(columns)):
-
-            # check if there is a page range that has capacity
-            page_range_index: int = self.table.get_nonempty_page_range()
-
-            # if page_range_index is the largest page index plus one 
-            # then there is no nonempty page range or a page range does not exist so make a new page range
-            if page_range_index == len(self.table.page_ranges):
-                self.table.append_page_range()
-
-            # select page_range to insert into
-            page_range: PageRange = self.table.page_ranges[page_range_index]
-
-            # check if there is enough base pages for the record in that page_range
-            # the record can span multiple base pages in a page_range
-            base_page_indices: list[int] = page_range.get_nonempty_base_pages()
-
-            # get list of smaller columns based on the current column
-            divided_columns = self._get_divided_columns(columns)
-
-            for index in range(len(base_page_indices)):
-                base_page_index: int = base_page_indices[index]
-                if base_page_index == len(page_range.pages): # there is no nonempty base page or the base page does not exist
-                    # make a new base page
-                    page_range.append_base_page(base_page_index)
-
-                # append the values to the base page
-                current_base_page: Page = page_range.pages[base_page_index]
-                smaller_column = divided_columns[index]
-                current_base_page.write(self.table, LATEST_RECORD, schema_encoding, key, page_range_index, base_page_index, smaller_column)
-
-            # increment rid
-            self.table.current_rid += 1
-
+        # increment rid
+        self.table.current_rid += 1
     
     """
     # Read matching record with specified search key
@@ -144,23 +145,47 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-        records = self.select(search_key, search_key_index, projected_columns_index)
-        records_with_correct_version = []
-        for record in records:
-            version = self.table.get_version(record.rid)
-            if version >= relative_version:
-                records_with_correct_version.append(record)
-        return records_with_correct_version
+        records: list[Record] = []
+        rids_visited = []
+        version = 0
+        # records can span multiple base pages so split projected columns
+        smaller_projected_columns_index = self._get_divided_columns(projected_columns_index)
 
-    
+        current_smaller_projected_columns: int = 0
+        for rid in self.table.page_directory:
+            if rid in rids_visited:
+                continue
+
+            entries: list[Entry] = self.table.page_directory[rid]
+            # get number of indirections
+            num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
+            num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
+
+            for index in range(num_indirections):
+                while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
+                    for entry in entries:
+                        if search_key == entry.cell_index and search_key_index == entry.column_index and version == relative_version:
+                            record: Record = self.table.get_record(entries, smaller_projected_columns_index[current_smaller_projected_columns])
+                            current_smaller_projected_columns += 1
+                            records.append(record)
+                        entries = self.table.page_directory[rid]
+                        version -= 1
+                        rids_visited.append(rid)
+        
+        return records
+
     """
     # Update a record with specified key and columns
     # Returns True if update is succesful
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns):
-        # always update latest version of a record
+        # always do update on a base record
+
         entries: list[Entry] = self.table.page_directory[primary_key]
+
+        # update indirections
+
         # get number of indirections
         num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
         num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
@@ -170,36 +195,41 @@ class Query:
                 rid = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
                 self.table.set_value(entries[INDIRECTION_COLUMN], rid - 1) # decrement version
                 entries = self.table.page_directory[rid]
-        record: Record = self.table.get_record(entries, None) # this record is the latest version of a record for a page
-        entries[INDIRECTION_COLUMN] =- 1 # update indirection for this record
+
+        # split values
+        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
+        divided_columns = self._get_divided_columns(columns, max_size)
+
+        # get base record
+        base_record = self.table.get_record(primary_key, entries, None)
 
         # update schema encoding
-        max_data_columns: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
-        schema_encoding = '0' * max_data_columns
-        for index in range(len(record.columns)):
-            current_value = record.columns[index]
+        schema_encoding = '0' * self.table.num_columns
+        for index in range(len(base_record.columns)):
+            current_value = base_record.columns[index]
             if current_value != columns[index]:
                 schema_encoding[index] = '1'
 
-        # check if there is enough tail pages for the record in that page_range
-        # the record can span multiple tail pages in a page_range
-        page_range_index = entries.page_range_index
+        # insert new tail record
+        page_range_index = entries[0].page_range_index
         page_range: PageRange = self.table.page_ranges[page_range_index]
-        tail_page_indices: list[int] = page_range.get_nonempty_tail_pages()
 
-        # get list of smaller columns based on the current column
-        divided_columns = self._get_divided_columns(columns)
-
+        num_tail_pages_needed = self._get_pages_needed(columns)
+        tail_page_indices = []
+        for index in range(num_tail_pages_needed):
+            tail_page_indices.append(page_range.get_nonempty_tail_pages())
+            current_tail_page_index = tail_page_indices[index]
+            if current_tail_page_index == MAX_BASE_PAGES + len(page_range.pages):
+                 # append base pages it is full or does not exist
+                 page_range.append_tail_page(tail_page_indices[index])
+        
+        # for each tail page insert values
         for index in range(len(tail_page_indices)):
-            tail_page_index: int = tail_page_indices[index]
-            if tail_page_index == len(page_range.pages): # there is no nonempty base page or the base page does not exist
-                # make a new base page
-                page_range.append_tail_page(tail_page_index)
-
-            # append the values to the base page
-            current_tail_page: Page = page_range.pages[tail_page_index]
-            smaller_column = divided_columns[index]
-            current_tail_page.write(self.table, LATEST_RECORD, schema_encoding, None, page_range_index, tail_page_index, smaller_column)
+            current_base_page_index: int = tail_page_indices[index]
+            current_base_page: Page = page_range.pages[current_base_page_index]
+            current_values = divided_columns[index]
+            current_base_page.write(self.table, LATEST_RECORD, schema_encoding, None, page_range_index, current_base_page_index, current_values)
+        
         # increment rid
         self.table.current_rid += 1
 
@@ -235,18 +265,28 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
+        sum = 0
+        rids_visited = []
+        version = 0
         for rid in self.table.page_directory:
-            entries: list[Entry] = self.table.page_directory[rid]
-            version = entries[INDIRECTION_COLUMN]
-            if rid == start_range and version >= relative_version:
-                sum = 0
-                while rid <= end_range:
-                    sum += self.table.get_value(entries[aggregate_column_index])
-                    rid += 1
-                    entries = self.table.page_directory[rid]
-                return sum
-        return False
+            if rid in rids_visited:
+                continue
 
+            entries: list[Entry] = self.table.page_directory[rid]
+            # get number of indirections
+            num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
+            num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
+
+            for index in range(num_indirections):
+                while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
+                    for entry in entries:
+                        rid = self.table.get_value(entries[RID_COLUMN])
+                        if version == relative_version and rid <= start_range and rid >= end_range:
+                            sum += self.table.get_value(entries[aggregate_column_index])
+                        entries = self.table.page_directory[rid]
+                        version -= 1
+                        rids_visited.append(rid)
+        return sum
     
     """
     incremenets one column of the record

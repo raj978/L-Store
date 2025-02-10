@@ -2,7 +2,7 @@ from lstore.index import Index, Entry
 from time import time
 
 from lstore.page import Page # import Page class
-from lstore.config import MAX_BASE_PAGES, NUM_SPECIFIED_COLUMNS, MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, LATEST_RECORD# import constants
+from lstore.config import MAX_BASE_PAGES, NUM_SPECIFIED_COLUMNS, MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, LATEST_RECORD, OFFSET # import constants
 
 class Record:
 
@@ -10,19 +10,6 @@ class Record:
         self.rid = rid
         self.key = key
         self.columns = columns
-
-# class Entry:
-#     """
-#     :param page_range_index: int         # index of page range in page_ranges in Table
-#     :param page_index: int               # index of page index in PageRange
-#     :param column_index: int             # index of column in Page
-#     :param cell_index: int               # index of cell in column
-#     """
-#     def __init__(self, page_range_index: int, page_index: int, column_index: int, cell_index: int):
-#         self.page_range_index: int = page_range_index
-#         self.page_index: int = page_index
-#         self.column_index: int = column_index
-#         self.cell_index: int = cell_index
 
 class PageRange:
 
@@ -58,17 +45,12 @@ class PageRange:
     # Returns the indices of a nonempty base pages
     # Returns the largest page range index plus one if there is no nonempty base page
     """
-    def get_nonempty_base_pages(self) -> list[int]:
-        base_page_indices: list[int] = []
+    def get_nonempty_base_pages(self) -> int:
         for page_index in self.pages:
             current_page: Page = self.pages[page_index]
             if current_page.has_capacity:
-                base_page_indices.append(page_index)
-            else:
-                base_page_indices.append(len(self.pages))
-        if len(self.pages) == 0:
-            base_page_indices.append(len(self.pages))
-        return base_page_indices
+                return page_index
+        return len(self.pages)
 
     """
     # Appends a base page given an index
@@ -77,7 +59,12 @@ class PageRange:
         self.pages[base_page_index] = Page()
 
     def get_nonempty_tail_pages(self):
-        pass
+        for page_index in self.pages:
+            if page_index > MAX_BASE_PAGES:
+                current_page = self.pages[MAX_BASE_PAGES + page_index]
+                if current_page.has_capacity:
+                    return MAX_BASE_PAGES + page_index
+        return MAX_BASE_PAGES + len(self.pages)
 
     """
     # Appends a tail page given an index
@@ -130,30 +117,31 @@ class Table:
     def append_page_range(self) -> None:
         # length of page_ranges is largest page index plus one
         self.page_ranges[len(self.page_ranges)] = PageRange()
-    
-    def _make_offset(col: int, cell: int):
-        return cell * (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) + col
+
+    def _column_to_val(page, column):
+        column *= OFFSET
+        val = ''
+        for value in page.data:
+            val += str(value)
+        return int(val)
 
     def get_value(self, entry: Entry):
         desired_page_range: PageRange = self.page_ranges[entry.page_range_index]
         desired_page: Page = desired_page_range.pages[entry.page_index]
         desired_col = entry.column_index
-        desired_cell = entry.cell_index
-        desired_val = desired_page.data[self._make_offset(desired_col, desired_cell)]
-        return desired_val
+        return self._column_to_val(desired_page, desired_col)
     
     def set_value(self, entry: Entry, value):
         desired_page_range: PageRange = self.table.page_ranges[entry.page_range_index]
         desired_page: Page = desired_page_range.pages[entry.page_index]
         desired_col = entry.column_index
-        desired_cell = entry.cell_index
-        desired_page.data[self.table._make_offset(desired_col, desired_cell)] = value
+        desired_page.insert_int_to_column(value, desired_col)
 
     def get_record(self, rid: int, entries: list[Entry], projected_columns_index) -> Record:
         record: Record = Record(rid, None, [])
         for entry_index in len(range(entries)):
             entry: Entry = entries[entry_index]
-            if entry.column_index >= NUM_SPECIFIED_COLUMNS and projected_columns_index[entry_index] != 0:
+            if entry.column_index >= NUM_SPECIFIED_COLUMNS and (projected_columns_index[entry_index] == 1 or projected_columns_index == None):
                 current_entry: Entry = entries[entry_index]
                 value = self.get_value(current_entry)
                 record.columns.append(value)
