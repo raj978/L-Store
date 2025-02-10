@@ -17,7 +17,7 @@ class Page:
     """
     # Convert schema encoding string to number in order to store it in schema encoding column
     """
-    def _binary_to_decimal(binary_str: str) -> int:
+    def _binary_to_decimal(self, binary_str: str) -> int:
         sum: int = 0
         for index in range(len(binary_str)):
             power: int = len(binary_str) - index
@@ -36,7 +36,7 @@ class Page:
         # insert specified columns
         self.data[INDIRECTION_COLUMN + self.num_records] = indirection # insert indirection
         self.data[RID_COLUMN + self.num_records] = table.current_rid # insert RID
-        self.data[TIMESTAMP_COLUMN + self.num_records] = time() - table.start_time() # timestamp is the current time minus the start time of when the table is initialized
+        self.data[TIMESTAMP_COLUMN + self.num_records] = int(time() - table.start_time) # timestamp is the current time minus the start time of when the table is initialized
         schema_encoding = self._binary_to_decimal(schema_encoding) # convert schema encoding to number
         self.data[SCHEMA_ENCODING_COLUMN + self.num_records] = schema_encoding # insert schema encoding
         self.data[KEY_COLUMN + self.num_records] = key # insert key

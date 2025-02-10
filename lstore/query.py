@@ -63,12 +63,14 @@ class Query:
     """
     def insert(self, *columns):
         # turn schema encoding into a decimal to store it and then convert it back to binary
-        max_data_columns: int = (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS
+        max_data_columns: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
         schema_encoding = '0' * max_data_columns
 
         # if table is full then return False
         
         key: int = columns[KEY_INDEX]
+
+        columns = columns[0:KEY_INDEX] + columns[KEY_INDEX + 1:len(columns)] # skip key
 
         # make a new record for each record passed in
         for index in range(len(columns)):
@@ -93,14 +95,14 @@ class Query:
 
             for index in range(len(base_page_indices)):
                 base_page_index: int = base_page_indices[index]
-                if base_page_index == len(page_range): # there is no nonempty base page or the base page does not exist
+                if base_page_index == len(page_range.pages): # there is no nonempty base page or the base page does not exist
                     # make a new base page
                     page_range.append_base_page(base_page_index)
 
                 # append the values to the base page
-                current_base_page: Page = page_range[base_page_index]
+                current_base_page: Page = page_range.pages[base_page_index]
                 smaller_column = divided_columns[index]
-                current_base_page.write(self.table.current_rid, LATEST_RECORD, schema_encoding, key, smaller_column)
+                current_base_page.write(self.table, LATEST_RECORD, schema_encoding, key, page_range_index, base_page_index, smaller_column)
 
             # increment rid
             self.table.current_rid += 1
@@ -172,7 +174,7 @@ class Query:
         entries[INDIRECTION_COLUMN] =- 1 # update indirection for this record
 
         # update schema encoding
-        max_data_columns: int = (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS
+        max_data_columns: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
         schema_encoding = '0' * max_data_columns
         for index in range(len(record.columns)):
             current_value = record.columns[index]
@@ -182,7 +184,7 @@ class Query:
         # check if there is enough tail pages for the record in that page_range
         # the record can span multiple tail pages in a page_range
         page_range_index = entries.page_range_index
-        page_range: PageRange =  self.table.page_ranges[page_range_index]
+        page_range: PageRange = self.table.page_ranges[page_range_index]
         tail_page_indices: list[int] = page_range.get_nonempty_tail_pages()
 
         # get list of smaller columns based on the current column
@@ -190,15 +192,14 @@ class Query:
 
         for index in range(len(tail_page_indices)):
             tail_page_index: int = tail_page_indices[index]
-            if tail_page_index == len(page_range): # there is no nonempty base page or the base page does not exist
+            if tail_page_index == len(page_range.pages): # there is no nonempty base page or the base page does not exist
                 # make a new base page
                 page_range.append_tail_page(tail_page_index)
 
             # append the values to the base page
-            current_tail_page: Page = page_range[tail_page_index]
+            current_tail_page: Page = page_range.pages[tail_page_index]
             smaller_column = divided_columns[index]
-            current_tail_page.write(self.table.current_rid, LATEST_RECORD, schema_encoding, None, smaller_column)
-
+            current_tail_page.write(self.table, LATEST_RECORD, schema_encoding, None, page_range_index, tail_page_index, smaller_column)
         # increment rid
         self.table.current_rid += 1
 

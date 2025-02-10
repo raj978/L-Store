@@ -66,6 +66,8 @@ class PageRange:
                 base_page_indices.append(page_index)
             else:
                 base_page_indices.append(len(self.pages))
+        if len(self.pages) == 0:
+            base_page_indices.append(len(self.pages))
         return base_page_indices
 
     """
