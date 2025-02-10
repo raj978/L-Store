@@ -1,7 +1,7 @@
 from lstore.table import Table, Record, Page, PageRange # imported Page class, PageRange class, and Entry class
 from lstore.index import Index, Entry
 
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN, MAX_BASE_PAGES # import constants
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_COLUMN, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN, MAX_BASE_PAGES # import constants
 
 class Query:
     """
@@ -48,8 +48,8 @@ class Query:
 
         entries: list[Entry] = self.table.page_directory[primary_key]
         # get number of indirections
-        num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
-        num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
+        num_columns: int = int(MAX_PAGE_SIZE / MAX_COLUMN_SIZE)
+        num_indirections = int((len(entries) // num_columns) + 1) # this is to ceiling the value
 
         for index in range(num_indirections):
             while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
@@ -72,8 +72,13 @@ class Query:
 
         # if table is full then return False
 
-        key = columns[KEY_INDEX] # get key
-        columns = columns[0:KEY_INDEX] + columns[KEY_INDEX + 1:len(columns)] # remove key from columns
+        columns = list(columns[0])
+
+
+        # TODO: fix KEY_COLUMN and KEY_INDEX
+        key_index = self.table.num_columns + NUM_SPECIFIED_COLUMNS - KEY_COLUMN
+        key = columns[KEY_COLUMN] # get key
+        columns = columns[0:KEY_COLUMN] + columns[KEY_COLUMN + 1:len(columns)] # remove key from columns
 
         # split values
         max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
@@ -90,7 +95,7 @@ class Query:
 
         # check if there is enough base pages for the record in that page_range
         # the record can span multiple base pages in a page_range
-        num_base_pages_needed = self._get_pages_needed(len(columns))
+        num_base_pages_needed = self._get_pages_needed(len(columns), max_size)
         base_page_indices = []
         for index in range(num_base_pages_needed):
             base_page_indices.append(page_range.get_nonempty_base_pages())
@@ -121,7 +126,8 @@ class Query:
     def select(self, search_key, search_key_index, projected_columns_index):
         records: list[Record] = []
         # records can span multiple base pages so split projected columns
-        smaller_projected_columns_index = self._get_divided_columns(projected_columns_index)
+        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
+        smaller_projected_columns_index = self._get_divided_columns(projected_columns_index, max_size)
         # index of smaller projected columns
         current_smaller_projected_columns: int = 0
         for rid in self.table.page_directory:
@@ -132,7 +138,6 @@ class Query:
                     current_smaller_projected_columns += 1
                     records.append(record)
         return records
-
     
     """
     # Read matching record with specified search key
@@ -149,7 +154,8 @@ class Query:
         rids_visited = []
         version = 0
         # records can span multiple base pages so split projected columns
-        smaller_projected_columns_index = self._get_divided_columns(projected_columns_index)
+        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
+        smaller_projected_columns_index = self._get_divided_columns(projected_columns_index, max_size)
 
         current_smaller_projected_columns: int = 0
         for rid in self.table.page_directory:
@@ -158,8 +164,8 @@ class Query:
 
             entries: list[Entry] = self.table.page_directory[rid]
             # get number of indirections
-            num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
-            num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
+            num_columns: int = int(MAX_PAGE_SIZE / MAX_COLUMN_SIZE)
+            num_indirections = int((len(entries) // num_columns) + 1) # this is to ceiling the value
 
             for index in range(num_indirections):
                 while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
@@ -169,8 +175,9 @@ class Query:
                             current_smaller_projected_columns += 1
                             records.append(record)
                         entries = self.table.page_directory[rid]
-                        version -= 1
-                        rids_visited.append(rid)
+                    version -= 1
+                    rids_visited.append(rid)
+                version = 0
         
         return records
 
@@ -187,8 +194,8 @@ class Query:
         # update indirections
 
         # get number of indirections
-        num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
-        num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
+        num_columns: int = int(MAX_PAGE_SIZE / MAX_COLUMN_SIZE)
+        num_indirections = int((len(entries) // num_columns) + 1) # this is to ceiling the value
 
         for index in range(num_indirections):
             while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
@@ -214,7 +221,7 @@ class Query:
         page_range_index = entries[0].page_range_index
         page_range: PageRange = self.table.page_ranges[page_range_index]
 
-        num_tail_pages_needed = self._get_pages_needed(columns)
+        num_tail_pages_needed = self._get_pages_needed(len(columns), max_size)
         tail_page_indices = []
         for index in range(num_tail_pages_needed):
             tail_page_indices.append(page_range.get_nonempty_tail_pages())
@@ -274,8 +281,8 @@ class Query:
 
             entries: list[Entry] = self.table.page_directory[rid]
             # get number of indirections
-            num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
-            num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
+            num_columns: int = int(MAX_PAGE_SIZE / MAX_COLUMN_SIZE)
+            num_indirections = int((len(entries) // num_columns) + 1) # this is to ceiling the value
 
             for index in range(num_indirections):
                 while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
@@ -284,8 +291,9 @@ class Query:
                         if version == relative_version and rid <= start_range and rid >= end_range:
                             sum += self.table.get_value(entries[aggregate_column_index])
                         entries = self.table.page_directory[rid]
-                        version -= 1
-                        rids_visited.append(rid)
+                    version -= 1
+                    rids_visited.append(rid)
+                version = 0
         return sum
     
     """

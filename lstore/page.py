@@ -10,6 +10,8 @@ class Page:
         self.num_records = 0
         self.data = bytearray(MAX_PAGE_SIZE)
 
+        self.is_negative = [] # keep track of what numbers are negative
+
     def has_capacity(self):
         # each row of aligned columns is a record so MAX_COLUMN_SIZE rows of aligned columns is the max
         return self.num_records < MAX_COLUMN_SIZE
@@ -31,44 +33,30 @@ class Page:
     def decimal_to_binary(number: int) -> str:
         pass
 
-    """
-    # Insert integer into a column where each column is 8 bytes
-    """
-    def insert_int_to_column(self, value, column):
-        column *= OFFSET
-        value = str(value)
-
-        # add padding
-        num_padding = OFFSET - len(value)
-        padding = '0' * num_padding
-        padding += value # prepend the padding to the value
-        value = padding
-
-        for index in range(len(value)):
-            digit = value[index]
-            self.data[column + index] = int(digit)
-
     def write(self, table, indirection: int, schema_encoding: str, key, page_range_index: int, page_index: int, values):
 
+        # get page to write to
+        desired_page_range = self.table.page_ranges[page_range_index]
+        desired_page = desired_page_range.pages[page_index]
+
         # insert specified columns
-        self.insert_int_to_column(indirection, INDIRECTION_COLUMN)
-        self.insert_int_to_column(table.current_rid, RID_COLUMN)
-        self.insert_int_to_column(int(time() - table.start_time), TIMESTAMP_COLUMN)
-        self.insert_int_to_column(self._binary_to_decimal(schema_encoding), SCHEMA_ENCODING_COLUMN)
-        self.insert_int_to_column(key, KEY_COLUMN)
+        table.insert_int_to_column(desired_page, indirection, INDIRECTION_COLUMN)
+        table.insert_int_to_column(desired_page, table.current_rid, RID_COLUMN)
+        table.insert_int_to_column(desired_page, int(time() - table.start_time), TIMESTAMP_COLUMN)
+        table.insert_int_to_column(desired_page, self._binary_to_decimal(schema_encoding), SCHEMA_ENCODING_COLUMN)
+        table.insert_int_to_column(desired_page, key, KEY_COLUMN)
 
 
         for index in range(len(values)):
             current_value = values[index]
             current_column = NUM_SPECIFIED_COLUMNS + index
-            self.insert_int_to_column(current_value, current_column)
+            table.insert_int_to_column(desired_page, current_value, current_column)
             # update page directory
             entry: Entry = Entry(page_range_index, page_index, current_column, self.num_records)
 
             # check if key is already in page directory
-            if table.current_rid in table.page_directory:
-                table.page_directory[self.num_records].append(entry)
-            else:
-                table.page_directory[self.num_records] = entry
+            if table.current_rid not in table.page_directory:
+                table.page_directory[table.current_rid] = []
+            table.page_directory[table.current_rid].append(entry)
 
-        self.num_records += 1
+        self.num_records += OFFSET
