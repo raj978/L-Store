@@ -1,7 +1,7 @@
 from lstore.table import Table, Record, Page, PageRange # imported Page class, PageRange class, and Entry class
 from lstore.index import Index, Entry
 
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN# import constants
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN # import constants
 
 class Query:
     """
@@ -63,7 +63,8 @@ class Query:
     """
     def insert(self, *columns):
         # turn schema encoding into a decimal to store it and then convert it back to binary
-        schema_encoding = '0' * self.table.num_columns
+        max_data_columns: int = (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS
+        schema_encoding = '0' * max_data_columns
 
         # if table is full then return False
         
@@ -124,7 +125,7 @@ class Query:
             entries: list[Entry] = self.table.page_directory[rid]
             for entry in entries:
                 if search_key == entry.cell_index and search_key_index == entry.column_index:
-                    record = self.table.get_record(entries, smaller_projected_columns_index[current_smaller_projected_columns])
+                    record: Record = self.table.get_record(entries, smaller_projected_columns_index[current_smaller_projected_columns])
                     current_smaller_projected_columns += 1
                     records.append(record)
         return records
@@ -157,9 +158,49 @@ class Query:
     """
     def update(self, primary_key, *columns):
         # always update latest version of a record
-        
+        entries: list[Entry] = self.table.page_directory[primary_key]
+        # get number of indirections
+        num_columns: int = MAX_PAGE_SIZE / MAX_COLUMN_SIZE
+        num_indirections = (len(entries) // num_columns) + 1 # this is to ceiling the value
 
-        pass
+        for index in range(num_indirections):
+            while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
+                rid = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
+                self.table.set_value(entries[INDIRECTION_COLUMN], rid - 1) # decrement version
+                entries = self.table.page_directory[rid]
+        record: Record = self.table.get_record(entries, None) # this record is the latest version of a record for a page
+        entries[INDIRECTION_COLUMN] =- 1 # update indirection for this record
+
+        # update schema encoding
+        max_data_columns: int = (MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS
+        schema_encoding = '0' * max_data_columns
+        for index in range(len(record.columns)):
+            current_value = record.columns[index]
+            if current_value != columns[index]:
+                schema_encoding[index] = '1'
+
+        # check if there is enough tail pages for the record in that page_range
+        # the record can span multiple tail pages in a page_range
+        page_range_index = entries.page_range_index
+        page_range: PageRange =  self.table.page_ranges[page_range_index]
+        tail_page_indices: list[int] = page_range.get_nonempty_tail_pages()
+
+        # get list of smaller columns based on the current column
+        divided_columns = self._get_divided_columns(columns)
+
+        for index in range(len(tail_page_indices)):
+            tail_page_index: int = tail_page_indices[index]
+            if tail_page_index == len(page_range): # there is no nonempty base page or the base page does not exist
+                # make a new base page
+                page_range.append_tail_page(tail_page_index)
+
+            # append the values to the base page
+            current_tail_page: Page = page_range[tail_page_index]
+            smaller_column = divided_columns[index]
+            current_tail_page.write(self.table.current_rid, LATEST_RECORD, schema_encoding, None, smaller_column)
+
+        # increment rid
+        self.table.current_rid += 1
 
     
     """
@@ -171,7 +212,16 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum(self, start_range, end_range, aggregate_column_index):
-        pass
+        for rid in self.table.page_directory:
+            entries: list[Entry] = self.table.page_directory[rid]
+            if rid == start_range:
+                sum = 0
+                while rid <= end_range:
+                    sum += self.table.get_value(entries[aggregate_column_index])
+                    rid += 1
+                    entries = self.table.page_directory[rid]
+                return sum
+        return False
 
     
     """
@@ -184,7 +234,17 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
-        pass
+        for rid in self.table.page_directory:
+            entries: list[Entry] = self.table.page_directory[rid]
+            version = entries[INDIRECTION_COLUMN]
+            if rid == start_range and version >= relative_version:
+                sum = 0
+                while rid <= end_range:
+                    sum += self.table.get_value(entries[aggregate_column_index])
+                    rid += 1
+                    entries = self.table.page_directory[rid]
+                return sum
+        return False
 
     
     """
