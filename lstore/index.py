@@ -1,7 +1,22 @@
+#from BTrees.OOBTree import OOBTree
+#tree = OOBTree()
 """
 A data strucutre holding indices for various columns of a table. Key column should be indexd by default, other columns can be indexed through this object. Indices are usually B-Trees, but other data structures can be used as well.
 """
+class Entry:
 
+    """
+    :param page_range_index: int         # index of page range in page_ranges in Table
+    :param page_index: int               # index of page index in PageRange
+    :param column_index: int             # index of column in Page
+    :param cell_index: int               # index of cell in column
+    """
+    def __init__(self, page_range_index: int, page_index: int, column_index: int, cell_index: int):
+        self.page_range_index: int = page_range_index
+        self.page_index: int = page_index
+        self.column_index: int = column_index
+        self.cell_index: int = cell_index
+        
 class Index:
 
     def __init__(self, table):
@@ -14,6 +29,7 @@ class Index:
     """
 
     def locate(self, column, value):
+
         pass
 
     """
@@ -21,6 +37,7 @@ class Index:
     """
 
     def locate_range(self, begin, end, column):
+
         pass
 
     """

@@ -1,5 +1,5 @@
-from lstore.table import Table, Record, Page, PageRange, Entry # imported Page class, PageRange class, and Entry class
-from lstore.index import Index
+from lstore.table import Table, Record, Page, PageRange # imported Page class, PageRange class, and Entry class
+from lstore.index import Index, Entry
 
 from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_INDEX, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN# import constants
 
