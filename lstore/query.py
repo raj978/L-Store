@@ -73,7 +73,7 @@ class Query:
             # go down that initial indirection
             indirection_index = (index * OFFSET) + INDIRECTION_COLUMN
             rid_index = (index * OFFSET) + RID_COLUMN
-            entries = self.table.page_directory[rid]
+            entries = self.table.page_directory[rid] # reset entries
             indirection = initial_indirections[index]
             self.table.set_value(entries[indirection_index], RECORD_DELETED) # set indirection to invalid
             self.table.set_value(entries[rid_index], RECORD_DELETED) # set rid to invalid
@@ -230,7 +230,7 @@ class Query:
         for index in range(len(initial_indirections)):
             # go down that initial indirection
             indirection_index = (index * OFFSET) + INDIRECTION_COLUMN
-            entries = self.table.page_directory[rid]
+            entries = self.table.page_directory[rid] # reset entries
             indirection = initial_indirections[index]
             if indirection == LATEST_RECORD:
                 self.table.set_value(entries[indirection_index], self.table.current_rid) # point the indirection to the current rid to be inserted
