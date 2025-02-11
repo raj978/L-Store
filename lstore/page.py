@@ -36,13 +36,19 @@ class Page:
     def write(self, table, indirection: int, schema_encoding: str, key, page_range_index: int, page_index: int, values):
 
         # get page to write to
-        desired_page_range = self.table.page_ranges[page_range_index]
+        desired_page_range = table.page_ranges[page_range_index]
         desired_page = desired_page_range.pages[page_index]
 
         # check if rid is already in page directory
         if table.current_rid not in table.page_directory:
             table.page_directory[table.current_rid] = []
-            table.key_to_rid[key] = table.current_rid # update key map
+
+        # check if key not in key to rid map
+        if key not in table.key_to_rid:
+            table.key_to_rid[key] = []
+        
+        # put in rid for key
+        table.key_to_rid[key].append(table.current_rid)
 
         # insert specified columns
         table.insert_int_to_column(desired_page, indirection, INDIRECTION_COLUMN)
@@ -50,6 +56,7 @@ class Page:
         table.insert_int_to_column(desired_page, int(time() - table.start_time), TIMESTAMP_COLUMN)
         table.insert_int_to_column(desired_page, self._binary_to_decimal(schema_encoding), SCHEMA_ENCODING_COLUMN)
         table.insert_int_to_column(desired_page, key, KEY_COLUMN)
+
 
         # update page directory
         entry = Entry(page_range_index, page_index, INDIRECTION_COLUMN)

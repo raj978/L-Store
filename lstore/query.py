@@ -94,7 +94,7 @@ class Query:
 
         # append base pages
         offset = len(page_range.pages)
-        for index in range(len(page_range.pages) - num_base_pages_needed):
+        for index in range(num_base_pages_needed - len(page_range.pages)):
             page_range.append_base_page(index + offset)
 
         # get nonempty base pages
@@ -185,7 +185,7 @@ class Query:
     def update(self, primary_key, *columns):
         # always do update on a base record
 
-        rid = self.table.key_to_rid[primary_key]
+        rid = self.table.key_to_rid[primary_key][0] # first rid is the base record
         entries: list[Entry] = self.table.page_directory[rid]
 
         columns = columns[KEY_INDEX+1:len(columns)] # remove key from columns
@@ -209,43 +209,41 @@ class Query:
             # go down that initial indirection
             indirection = initial_indirection
             while indirection != LATEST_RECORD:
-                rid = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
-                self.table.set_value(entries[INDIRECTION_COLUMN], rid - 1) # decrement version
-                entries = self.table.page_directory[rid]
+                indirection = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
+                if indirection == LATEST_RECORD:
+                    self.table.set_value(entries[INDIRECTION_COLUMN], self.table.current_rid) # point the indirection to the current rid to be inserted
+                entries = self.table.page_directory[indirection]
 
         # get base record
         base_record = self.table.get_record(primary_key, entries, None)
 
         # update schema encoding
-        schema_encoding = '0' * self.table.num_columns
+        schema_encoding = ''
         for index in range(len(base_record.columns)):
             current_value = base_record.columns[index]
             if current_value != columns[index]:
-                schema_encoding[index] = '1'
+                schema_encoding += '1'
+            else:
+                schema_encoding += '0'
 
         # insert new tail record
         page_range_index = entries[0].page_range_index
         page_range: PageRange = self.table.page_ranges[page_range_index]
 
-        num_tail_pages_needed = len(divided_columns)
         tail_page_indices = []
-        for index in range(num_tail_pages_needed):
-            tail_page_indices.append(page_range.get_nonempty_tail_pages())
-            current_tail_page_index = tail_page_indices[index]
-            if current_tail_page_index == MAX_BASE_PAGES + len(page_range.pages):
-                 # append base pages it is full or does not exist
-                 page_range.append_tail_page(tail_page_indices[index])
-        
+        num_tail_pages_needed = len(divided_columns)
+        for _ in range(num_tail_pages_needed):
+            tail_page_indices.append(page_range.append_tail_page())
+
         # for each tail page insert values
         for index in range(len(tail_page_indices)):
-            current_base_page_index: int = tail_page_indices[index]
-            current_base_page: Page = page_range.pages[current_base_page_index]
+            current_tail_page_index: int = tail_page_indices[index]
+            current_tail_page: Page = page_range.pages[current_tail_page_index]
             current_values = divided_columns[index]
-            current_base_page.write(self.table, LATEST_RECORD, schema_encoding, None, page_range_index, current_base_page_index, current_values)
+            current_tail_page.write(self.table, LATEST_RECORD, schema_encoding, primary_key, page_range_index, current_tail_page_index, current_values)
         
         # increment rid
         self.table.current_rid += 1
-
     
     """
     :param start_range: int         # Start of the key range to aggregate 
@@ -266,7 +264,6 @@ class Query:
                     entries = self.table.page_directory[rid]
                 return sum
         return False
-
     
     """
     :param start_range: int         # Start of the key range to aggregate 

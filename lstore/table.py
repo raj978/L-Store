@@ -73,9 +73,13 @@ class PageRange:
     """
     # Appends a tail page given an index
     """
-    def append_tail_page(self) -> None:
-        self.pages[MAX_BASE_PAGES + self.num_tail_pages] = Page()
+    def append_tail_page(self) -> int:
+        tail_page_index = MAX_BASE_PAGES + self.num_tail_pages
+        self.pages[tail_page_index] = Page()
+        for _ in range(OFFSET):
+            self.pages[tail_page_index].is_negative.append(0)
         self.num_tail_pages += 1
+        return tail_page_index
     
 class Table:
 
@@ -99,7 +103,7 @@ class Table:
         # page_ranges = {page_range_index : PageRange object}
         """
         self.page_ranges: dict[int : PageRange] = {}
-        self.key_to_rid = dict[int : int] = {} # maps key to rid
+        self.key_to_rid: dict[int : list[int]] = {} # maps key to rids
 
     def __merge(self):
         print("merge is happening")
@@ -133,7 +137,7 @@ class Table:
             is_negative = False
         column *= OFFSET
         val = bytearray(OFFSET)
-        for index in range(len(OFFSET)):
+        for index in range(OFFSET):
             val[index] = page.data[column + index]
         return int.from_bytes(val, signed=is_negative)
     
@@ -168,7 +172,7 @@ class Table:
         record: Record = Record(rid, None, [])
         for entry_index in len(range(entries)):
             entry: Entry = entries[entry_index]
-            if entry.column_index >= NUM_SPECIFIED_COLUMNS and (projected_columns_index[entry_index] == 1 or projected_columns_index == None):
+            if entry.column_index >= NUM_SPECIFIED_COLUMNS and (projected_columns_index == None or projected_columns_index[entry_index] == 1):
                 current_entry: Entry = entries[entry_index]
                 value = self.get_value(current_entry)
                 record.columns.append(value)
