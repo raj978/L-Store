@@ -99,6 +99,7 @@ class Table:
         # page_ranges = {page_range_index : PageRange object}
         """
         self.page_ranges: dict[int : PageRange] = {}
+        self.key_to_rid = dict[int : int] = {} # maps key to rid
 
     def __merge(self):
         print("merge is happening")
@@ -158,7 +159,7 @@ class Table:
         return self._column_to_val(desired_page, desired_col)
     
     def set_value(self, entry: Entry, value):
-        desired_page_range: PageRange = self.table.page_ranges[entry.page_range_index]
+        desired_page_range: PageRange = self.page_ranges[entry.page_range_index]
         desired_page: Page = desired_page_range.pages[entry.page_index]
         desired_col = entry.column_index
         return self.insert_int_to_column(desired_page, value, desired_col)

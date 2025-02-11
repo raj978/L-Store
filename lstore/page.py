@@ -39,6 +39,11 @@ class Page:
         desired_page_range = self.table.page_ranges[page_range_index]
         desired_page = desired_page_range.pages[page_index]
 
+        # check if rid is already in page directory
+        if table.current_rid not in table.page_directory:
+            table.page_directory[table.current_rid] = []
+            table.key_to_rid[key] = table.current_rid # update key map
+
         # insert specified columns
         table.insert_int_to_column(desired_page, indirection, INDIRECTION_COLUMN)
         table.insert_int_to_column(desired_page, table.current_rid, RID_COLUMN)
@@ -46,16 +51,28 @@ class Page:
         table.insert_int_to_column(desired_page, self._binary_to_decimal(schema_encoding), SCHEMA_ENCODING_COLUMN)
         table.insert_int_to_column(desired_page, key, KEY_COLUMN)
 
+        # update page directory
+        entry = Entry(page_range_index, page_index, INDIRECTION_COLUMN)
+        table.page_directory[table.current_rid].append(entry)
+
+        entry = Entry(page_range_index, page_index, RID_COLUMN)
+        table.page_directory[table.current_rid].append(entry)
+
+        entry = Entry(page_range_index, page_index, TIMESTAMP_COLUMN)
+        table.page_directory[table.current_rid].append(entry)
+
+        entry = Entry(page_range_index, page_index, SCHEMA_ENCODING_COLUMN)
+        table.page_directory[table.current_rid].append(entry)
+
+        entry = Entry(page_range_index, page_index, KEY_COLUMN)
+        table.page_directory[table.current_rid].append(entry)
+        
         for index in range(len(values)):
             current_value = values[index]
             current_column = NUM_SPECIFIED_COLUMNS + index
             table.insert_int_to_column(desired_page, current_value, current_column)
             # update page directory
-            entry: Entry = Entry(page_range_index, page_index, current_column)
-
-            # check if key is already in page directory
-            if table.current_rid not in table.page_directory:
-                table.page_directory[table.current_rid] = []
+            entry = Entry(page_range_index, page_index, current_column)
             table.page_directory[table.current_rid].append(entry)
 
         self.num_records += 1

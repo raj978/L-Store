@@ -1,7 +1,7 @@
 from lstore.table import Table, Record, Page, PageRange # imported Page class, PageRange class, and Entry class
 from lstore.index import Index, Entry
 
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN, MAX_BASE_PAGES, KEY_INDEX # import constants
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN, MAX_BASE_PAGES, KEY_INDEX, OFFSET # import constants
 
 class Query:
     """
@@ -73,7 +73,7 @@ class Query:
         # if table is full then return False
 
         key = columns[KEY_INDEX] # get key
-        columns = columns[1:len(columns)] # remove key from columns
+        columns = columns[KEY_INDEX+1:len(columns)] # remove key from columns
 
         # split values
         max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
@@ -185,23 +185,33 @@ class Query:
     def update(self, primary_key, *columns):
         # always do update on a base record
 
-        entries: list[Entry] = self.table.page_directory[primary_key]
+        rid = self.table.key_to_rid[primary_key]
+        entries: list[Entry] = self.table.page_directory[rid]
+
+        columns = columns[KEY_INDEX+1:len(columns)] # remove key from columns
 
         # update indirections
-
-        # get number of indirections
-        num_columns: int = int(MAX_PAGE_SIZE / MAX_COLUMN_SIZE)
-        num_indirections = int((len(entries) // num_columns) + 1) # this is to ceiling the value
-
-        for index in range(num_indirections):
-            while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
-                rid = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
-                self.table.set_value(entries[INDIRECTION_COLUMN], rid - 1) # decrement version
-                entries = self.table.page_directory[rid]
 
         # split values
         max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
         divided_columns = self._get_divided_columns(columns, max_size)
+
+        num_indirections = len(divided_columns)
+
+        # get initial indirections
+        initial_indirections = []
+        for index in range(num_indirections):
+            indirection_index = (index * OFFSET) + INDIRECTION_COLUMN
+            indirection = self.table.get_value(entries[indirection_index])
+            initial_indirections.append(indirection)
+
+        for initial_indirection in initial_indirections:
+            # go down that initial indirection
+            indirection = initial_indirection
+            while indirection != LATEST_RECORD:
+                rid = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
+                self.table.set_value(entries[INDIRECTION_COLUMN], rid - 1) # decrement version
+                entries = self.table.page_directory[rid]
 
         # get base record
         base_record = self.table.get_record(primary_key, entries, None)
