@@ -4,7 +4,7 @@ TIMESTAMP_COLUMN = 2
 SCHEMA_ENCODING_COLUMN = 3
 KEY_COLUMN = 4
 
-KEY_INDEX = 0 # index of key in the record that is passed in
+KEY_INDEX = 0 # modify this later for future milestones
 NUM_SPECIFIED_COLUMNS = 5 # this is to make space for columns that do not hold data
 
 MAX_BASE_PAGES = 16 # max number of base pages in a page range

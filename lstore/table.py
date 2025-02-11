@@ -43,20 +43,24 @@ class PageRange:
 
     """
     # Returns the indices of a nonempty base pages
-    # Returns the largest page range index plus one if there is no nonempty base page
     """
-    def get_nonempty_base_pages(self) -> int:
+    def get_nonempty_base_pages(self, num_base_pages_needed) -> list[int]:
+        base_page_indices = []
         for page_index in self.pages:
+            if len(base_page_indices) >= num_base_pages_needed:
+                return base_page_indices
             current_page: Page = self.pages[page_index]
             if current_page.has_capacity:
-                return page_index
-        return len(self.pages)
+                base_page_indices.append(page_index)
+        return base_page_indices
 
     """
     # Appends a base page given an index
     """
     def append_base_page(self, base_page_index: int) -> None:
         self.pages[base_page_index] = Page()
+        for _ in range(OFFSET):
+            self.pages[base_page_index].is_negative.append(0)
 
     def get_nonempty_tail_pages(self):
         for page_index in self.pages:
@@ -136,13 +140,13 @@ class Table:
     # Insert integer into a column where each column is 8 bytes
     """
     def insert_int_to_column(self, page, value, column):
-        column *= OFFSET
         if value < 0:
             is_negative = True
-            page.is_negative.append(1)
+            page.is_negative[column] = 1
         else:
             is_negative = False
-            page.is_negative.append(0)
+            page.is_negative[column] = 0
+        column *= OFFSET
         value = value.to_bytes(OFFSET, signed=is_negative)
         for index in range(len(value)):
             page.data[column + index] = value[index]

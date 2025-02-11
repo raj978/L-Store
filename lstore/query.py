@@ -1,7 +1,7 @@
 from lstore.table import Table, Record, Page, PageRange # imported Page class, PageRange class, and Entry class
 from lstore.index import Index, Entry
 
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, KEY_COLUMN, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN, MAX_BASE_PAGES # import constants
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN, MAX_BASE_PAGES, KEY_INDEX # import constants
 
 class Query:
     """
@@ -72,13 +72,8 @@ class Query:
 
         # if table is full then return False
 
-        columns = list(columns[0])
-
-
-        # TODO: fix KEY_COLUMN and KEY_INDEX
-        key_index = self.table.num_columns + NUM_SPECIFIED_COLUMNS - KEY_COLUMN
-        key = columns[KEY_COLUMN] # get key
-        columns = columns[0:KEY_COLUMN] + columns[KEY_COLUMN + 1:len(columns)] # remove key from columns
+        key = columns[KEY_INDEX] # get key
+        columns = columns[1:len(columns)] # remove key from columns
 
         # split values
         max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
@@ -95,14 +90,15 @@ class Query:
 
         # check if there is enough base pages for the record in that page_range
         # the record can span multiple base pages in a page_range
-        num_base_pages_needed = self._get_pages_needed(len(columns), max_size)
-        base_page_indices = []
-        for index in range(num_base_pages_needed):
-            base_page_indices.append(page_range.get_nonempty_base_pages())
-            current_base_page_index = base_page_indices[index]
-            if current_base_page_index == len(page_range.pages):
-                 # append base pages it is full or does not exist
-                 page_range.append_base_page(base_page_indices[index])
+        num_base_pages_needed = len(divided_columns)
+
+        # append base pages
+        offset = len(page_range.pages)
+        for index in range(len(page_range.pages) - num_base_pages_needed):
+            page_range.append_base_page(index + offset)
+
+        # get nonempty base pages
+        base_page_indices = page_range.get_nonempty_base_pages(num_base_pages_needed)
 
         # for each base page, insert values
         for index in range(len(base_page_indices)):
@@ -221,7 +217,7 @@ class Query:
         page_range_index = entries[0].page_range_index
         page_range: PageRange = self.table.page_ranges[page_range_index]
 
-        num_tail_pages_needed = self._get_pages_needed(len(columns), max_size)
+        num_tail_pages_needed = len(divided_columns)
         tail_page_indices = []
         for index in range(num_tail_pages_needed):
             tail_page_indices.append(page_range.get_nonempty_tail_pages())

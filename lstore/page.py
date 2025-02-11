@@ -13,8 +13,8 @@ class Page:
         self.is_negative = [] # keep track of what numbers are negative
 
     def has_capacity(self):
-        # each row of aligned columns is a record so MAX_COLUMN_SIZE rows of aligned columns is the max
-        return self.num_records < MAX_COLUMN_SIZE
+        # each column is OFFSET bytes
+        return (self.num_records * OFFSET) < MAX_COLUMN_SIZE
     
     """
     # Convert schema encoding string to number in order to store it in schema encoding column
@@ -46,17 +46,16 @@ class Page:
         table.insert_int_to_column(desired_page, self._binary_to_decimal(schema_encoding), SCHEMA_ENCODING_COLUMN)
         table.insert_int_to_column(desired_page, key, KEY_COLUMN)
 
-
         for index in range(len(values)):
             current_value = values[index]
             current_column = NUM_SPECIFIED_COLUMNS + index
             table.insert_int_to_column(desired_page, current_value, current_column)
             # update page directory
-            entry: Entry = Entry(page_range_index, page_index, current_column, self.num_records)
+            entry: Entry = Entry(page_range_index, page_index, current_column)
 
             # check if key is already in page directory
             if table.current_rid not in table.page_directory:
                 table.page_directory[table.current_rid] = []
             table.page_directory[table.current_rid].append(entry)
 
-        self.num_records += OFFSET
+        self.num_records += 1

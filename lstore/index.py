@@ -8,13 +8,11 @@ class Entry:
     :param page_range_index: int         # index of page range in page_ranges in Table
     :param page_index: int               # index of page index in PageRange
     :param column_index: int             # index of column in Page
-    :param cell_index: int               # index of cell in column
     """
-    def __init__(self, page_range_index: int, page_index: int, column_index: int, cell_index: int):
+    def __init__(self, page_range_index: int, page_index: int, column_index: int):
         self.page_range_index: int = page_range_index
         self.page_index: int = page_index
         self.column_index: int = column_index
-        self.cell_index: int = cell_index
         
 class Index:
 
