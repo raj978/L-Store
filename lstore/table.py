@@ -168,8 +168,8 @@ class Table:
         desired_col = entry.column_index
         return self.insert_int_to_column(desired_page, value, desired_col)
 
-    def get_record(self, rid: int, entries: list[Entry], projected_columns_index) -> Record:
-        record: Record = Record(rid, None, [])
+    def get_record(self, rid: int, key, entries: list[Entry], projected_columns_index) -> Record:
+        record: Record = Record(rid, key, [])
         for entry_index in len(range(entries)):
             entry: Entry = entries[entry_index]
             if entry.column_index >= NUM_SPECIFIED_COLUMNS and (projected_columns_index == None or projected_columns_index[entry_index] == 1):

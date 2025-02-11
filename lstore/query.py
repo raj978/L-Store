@@ -45,12 +45,11 @@ class Query:
     # Return False if record doesn't exist or is locked due to 2PL
     """
     def delete(self, primary_key, *columns):
-        # always do update on a base record
 
         rid = self.table.key_to_rid[primary_key][0] # first rid is the base record
         entries: list[Entry] = self.table.page_directory[rid]
 
-        record = self.table.get_record(rid, entries, None)
+        record = self.table.get_record(rid, primary_key, entries, None)
         columns = record.columns
         columns = columns[KEY_INDEX+1:len(columns)] # remove key from columns
 
@@ -242,7 +241,7 @@ class Query:
                     entries = self.table.page_directory[indirection]
 
         # get base record
-        base_record = self.table.get_record(primary_key, entries, None)
+        base_record = self.table.get_record(rid, primary_key, entries, None)
 
         # update schema encoding
         schema_encoding = ''
