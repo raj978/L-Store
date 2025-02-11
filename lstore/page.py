@@ -1,5 +1,5 @@
 # from lstore.table import Table, Entry # import Table class and Entry class
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, KEY_COLUMN, NUM_SPECIFIED_COLUMNS, OFFSET, KEY_INDEX # import constants
+from lstore.config import * 
 from lstore.index import Entry
 
 from time import time

@@ -2,7 +2,7 @@ from lstore.index import Index, Entry
 from time import time
 
 from lstore.page import Page # import Page class
-from lstore.config import MAX_BASE_PAGES, NUM_SPECIFIED_COLUMNS, MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, LATEST_RECORD, OFFSET, KEY_INDEX # import constants
+from lstore.config import * 
 
 class Record:
 
@@ -103,7 +103,7 @@ class Table:
         # page_ranges = {page_range_index : PageRange object}
         """
         self.page_ranges: dict[int : PageRange] = {}
-        self.key_to_rid: dict[int : list[int]] = {} # maps key to rids
+        self.key_to_rid: dict[int : int] = {} # maps key to rid
 
     def __merge(self):
         print("merge is happening")
@@ -174,6 +174,7 @@ class Table:
             entry: Entry = entries[entry_index]
             if entry.column_index >= NUM_SPECIFIED_COLUMNS:
                 current_entry: Entry = entries[entry_index]
+                #does this mean that only stuff in the second base/tail page get added? #
                 value = self.get_value(current_entry)
                 if value != key:
                     record.columns.append(value)

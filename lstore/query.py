@@ -1,7 +1,7 @@
 from lstore.table import Table, Record, Page, PageRange # imported Page class, PageRange class, and Entry class
 from lstore.index import Index, Entry
 
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, NUM_SPECIFIED_COLUMNS, INDIRECTION_COLUMN, LATEST_RECORD, RECORD_DELETED, RID_COLUMN, MAX_BASE_PAGES, KEY_INDEX, OFFSET # import constants
+from lstore.config import *
 
 class Query:
     """
@@ -21,16 +21,17 @@ class Query:
     """
     def _get_divided_columns(self, column, max_size):
         smaller_columns = []
-        smaller_column = []
+        tiny_col = []
         for value in column:
-            if len(smaller_column) == max_size:
+            if len(tiny_col) == max_size:
                 # smaller column has reached max size so append it
-                smaller_columns.append(smaller_column)
-                smaller_column = []
-            smaller_column.append(value)
-        if len(smaller_column) != 0:
-            smaller_columns.append(smaller_column)
+                smaller_columns.append(tiny_col)
+                tiny_col = []
+            tiny_col.append(value)
+        if len(tiny_col) != 0:
+            smaller_columns.append(tiny_col)
         return smaller_columns
+    
     
     """
     # Returns the number of pages needed for however many columns there are
