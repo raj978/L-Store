@@ -12,6 +12,6 @@ RECORD_DELETED = -2 # special value for deleted records
 MAX_PAGE_SIZE = 4096
 MAX_COLUMN_SIZE = 512
 
-LATEST_RECORD = 0  # special value indicating that this record is the latest record
+LATEST_RECORD = -1  # special value indicating that this record is the latest record
 
 OFFSET = 8 # there are 8 bytes in a column

@@ -44,22 +44,44 @@ class Query:
     # Returns True upon succesful deletion
     # Return False if record doesn't exist or is locked due to 2PL
     """
-    def delete(self, primary_key):
+    def delete(self, primary_key, *columns):
+        # always do update on a base record
 
-        entries: list[Entry] = self.table.page_directory[primary_key]
-        # get number of indirections
-        num_columns: int = int(MAX_PAGE_SIZE / MAX_COLUMN_SIZE)
-        num_indirections = int((len(entries) // num_columns) + 1) # this is to ceiling the value
+        rid = self.table.key_to_rid[primary_key][0] # first rid is the base record
+        entries: list[Entry] = self.table.page_directory[rid]
 
+        record = self.table.get_record(rid, entries, None)
+        columns = record.columns
+        columns = columns[KEY_INDEX+1:len(columns)] # remove key from columns
+
+        # update indirections
+
+        # split values
+        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
+        divided_columns = self._get_divided_columns(columns, max_size)
+
+        num_indirections = len(divided_columns)
+
+        # get initial indirections
+        initial_indirections = []
         for index in range(num_indirections):
-            while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
-                rid = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
-                self.table.set_value(entries[RID_COLUMN], RECORD_DELETED) # set rid to invalid
-                self.table.set_value(entries[INDIRECTION_COLUMN], RECORD_DELETED) # set indirection to invalid
-                entries = self.table.page_directory[rid]
-        
-        # update the page directory
-        del self.table.page_directory[primary_key]
+            indirection_index = (index * OFFSET) + INDIRECTION_COLUMN
+            indirection = self.table.get_value(entries[indirection_index])
+            initial_indirections.append(indirection)
+
+        for index in range(len(initial_indirections)):
+            # go down that initial indirection
+            indirection_index = (index * OFFSET) + INDIRECTION_COLUMN
+            rid_index = (index * OFFSET) + RID_COLUMN
+            entries = self.table.page_directory[rid]
+            indirection = initial_indirections[index]
+            self.table.set_value(entries[indirection_index], RECORD_DELETED) # set indirection to invalid
+            self.table.set_value(entries[rid_index], RECORD_DELETED) # set rid to invalid
+            while indirection != LATEST_RECORD:
+                entries = self.table.page_directory[indirection]
+                indirection = self.table.get_value(entries[indirection_index])
+                self.table.set_value(entries[indirection_index], RECORD_DELETED) # set indirection to invalid
+                self.table.set_value(entries[rid_index], RECORD_DELETED) # set rid to invalid
 
     """
     # Insert a record with specified columns
@@ -176,7 +198,7 @@ class Query:
                 version = 0
         
         return records
-
+    
     """
     # Update a record with specified key and columns
     # Returns True if update is succesful
@@ -205,14 +227,19 @@ class Query:
             indirection = self.table.get_value(entries[indirection_index])
             initial_indirections.append(indirection)
 
-        for initial_indirection in initial_indirections:
+        for index in range(len(initial_indirections)):
             # go down that initial indirection
-            indirection = initial_indirection
+            indirection_index = (index * OFFSET) + INDIRECTION_COLUMN
+            entries = self.table.page_directory[rid]
+            indirection = initial_indirections[index]
+            if indirection == LATEST_RECORD:
+                self.table.set_value(entries[indirection_index], self.table.current_rid) # point the indirection to the current rid to be inserted
             while indirection != LATEST_RECORD:
-                indirection = self.table.get_value(entries[INDIRECTION_COLUMN]) # get rid of next tail record
+                indirection = self.table.get_value(entries[indirection_index]) # get rid of next tail record
                 if indirection == LATEST_RECORD:
-                    self.table.set_value(entries[INDIRECTION_COLUMN], self.table.current_rid) # point the indirection to the current rid to be inserted
-                entries = self.table.page_directory[indirection]
+                    self.table.set_value(entries[indirection_index], self.table.current_rid) # point the indirection to the current rid to be inserted
+                else:
+                    entries = self.table.page_directory[indirection]
 
         # get base record
         base_record = self.table.get_record(primary_key, entries, None)
