@@ -2,7 +2,7 @@ from lstore.index import Index, Entry
 from time import time
 
 from lstore.page import Page # import Page class
-from lstore.config import MAX_BASE_PAGES, NUM_SPECIFIED_COLUMNS, MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, LATEST_RECORD, OFFSET # import constants
+from lstore.config import MAX_BASE_PAGES, NUM_SPECIFIED_COLUMNS, MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, LATEST_RECORD, OFFSET, KEY_INDEX # import constants
 
 class Record:
 
@@ -168,20 +168,21 @@ class Table:
         desired_col = entry.column_index
         return self.insert_int_to_column(desired_page, value, desired_col)
 
-    def get_record(self, rid: int, key, entries: list[Entry], projected_columns_index) -> Record:
-        record: Record = Record(rid, key, [])
-        for entry_index in len(range(entries)):
+    def get_record(self, rid: int, key, entries: list[Entry]) -> Record:
+        record = Record(rid, key, [])
+        for entry_index in range(len(entries)):
             entry: Entry = entries[entry_index]
-            if entry.column_index >= NUM_SPECIFIED_COLUMNS and (projected_columns_index == None or projected_columns_index[entry_index] == 1):
+            if entry.column_index >= NUM_SPECIFIED_COLUMNS:
                 current_entry: Entry = entries[entry_index]
                 value = self.get_value(current_entry)
-                record.columns.append(value)
+                if value != key:
+                    record.columns.append(value)
+                elif value == key and key not in record.columns:
+                    record.columns.append(value) # append the key but only once
         return record
     
-    def get_version(self, rid):
-        version: int = 0
-        entries: list[Entry] = self.page_directory[rid]
-        while self.get_value(entries[INDIRECTION_COLUMN]) != LATEST_RECORD:
-            entries: list[Entry] = self.page_directory[rid]
-            version -= 1
-        return version
+    def get_version(self, rid, key):
+        list_of_rids = self.key_to_rid[key] # key_to_rid = {key: [rid 1, rid 2, etc.]}
+        for index in range(len(list_of_rids)):
+            if rid == list_of_rids[index]:
+                return index * -1 # base record is 0, first tail record is -1, second tail record is -2, etc.

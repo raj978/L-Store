@@ -1,5 +1,5 @@
 # from lstore.table import Table, Entry # import Table class and Entry class
-from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, KEY_COLUMN, NUM_SPECIFIED_COLUMNS, OFFSET # import constants
+from lstore.config import MAX_PAGE_SIZE, MAX_COLUMN_SIZE, INDIRECTION_COLUMN, RID_COLUMN, TIMESTAMP_COLUMN, SCHEMA_ENCODING_COLUMN, KEY_COLUMN, NUM_SPECIFIED_COLUMNS, OFFSET, KEY_INDEX # import constants
 from lstore.index import Entry
 
 from time import time
@@ -33,7 +33,7 @@ class Page:
     def decimal_to_binary(number: int) -> str:
         pass
 
-    def write(self, table, indirection: int, schema_encoding: str, key, page_range_index: int, page_index: int, values):
+    def write(self, table, indirection: int, key, schema_encoding: str, page_range_index: int, page_index: int, values):
 
         # get page to write to
         desired_page_range = table.page_ranges[page_range_index]
@@ -48,7 +48,8 @@ class Page:
             table.key_to_rid[key] = []
         
         # put in rid for key
-        table.key_to_rid[key].append(table.current_rid)
+        if table.current_rid not in table.key_to_rid[key]:
+            table.key_to_rid[key].append(table.current_rid)
 
         # insert specified columns
         table.insert_int_to_column(desired_page, indirection, INDIRECTION_COLUMN)
@@ -56,7 +57,6 @@ class Page:
         table.insert_int_to_column(desired_page, int(time() - table.start_time), TIMESTAMP_COLUMN)
         table.insert_int_to_column(desired_page, self._binary_to_decimal(schema_encoding), SCHEMA_ENCODING_COLUMN)
         table.insert_int_to_column(desired_page, key, KEY_COLUMN)
-
 
         # update page directory
         entry = Entry(page_range_index, page_index, INDIRECTION_COLUMN)
@@ -73,13 +73,21 @@ class Page:
 
         entry = Entry(page_range_index, page_index, KEY_COLUMN)
         table.page_directory[table.current_rid].append(entry)
-        
-        for index in range(len(values)):
-            current_value = values[index]
-            current_column = NUM_SPECIFIED_COLUMNS + index
+
+        # insert values
+        value_index = 0
+        column_index = 0
+        while value_index < len(values):
+            if column_index == KEY_INDEX:
+                column_index += 1
+                continue
+            current_value = values[value_index]
+            current_column = NUM_SPECIFIED_COLUMNS + column_index
             table.insert_int_to_column(desired_page, current_value, current_column)
             # update page directory
             entry = Entry(page_range_index, page_index, current_column)
             table.page_directory[table.current_rid].append(entry)
+            value_index += 1
+            column_index += 1
 
         self.num_records += 1

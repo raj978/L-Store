@@ -5,7 +5,7 @@ SCHEMA_ENCODING_COLUMN = 3
 KEY_COLUMN = 4
 
 KEY_INDEX = 0 # modify this later for future milestones
-NUM_SPECIFIED_COLUMNS = 5 # this is to make space for columns that do not hold data
+NUM_SPECIFIED_COLUMNS = 4 # this is to make space for columns that do not hold data
 
 MAX_BASE_PAGES = 16 # max number of base pages in a page range
 RECORD_DELETED = -2 # special value for deleted records

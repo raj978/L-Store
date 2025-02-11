@@ -49,14 +49,14 @@ class Query:
         rid = self.table.key_to_rid[primary_key][0] # first rid is the base record
         entries: list[Entry] = self.table.page_directory[rid]
 
-        record = self.table.get_record(rid, primary_key, entries, None)
+        record = self.table.get_record(rid, primary_key, entries)
         columns = record.columns
         columns = columns[KEY_INDEX+1:len(columns)] # remove key from columns
 
         # update indirections
 
         # split values
-        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
+        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS - 1) # subtract one to make space for the key
         divided_columns = self._get_divided_columns(columns, max_size)
 
         num_indirections = len(divided_columns)
@@ -82,6 +82,8 @@ class Query:
                 self.table.set_value(entries[indirection_index], RECORD_DELETED) # set indirection to invalid
                 self.table.set_value(entries[rid_index], RECORD_DELETED) # set rid to invalid
 
+        return True
+
     """
     # Insert a record with specified columns
     # Return True upon succesful insertion
@@ -93,11 +95,12 @@ class Query:
 
         # if table is full then return False
 
-        key = columns[KEY_INDEX] # get key
+        # get key
+        key = columns[KEY_INDEX]
         columns = columns[KEY_INDEX+1:len(columns)] # remove key from columns
 
         # split values
-        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
+        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS - 1) # subtract one to make space for the key
         divided_columns = self._get_divided_columns(columns, max_size)
 
         # check if there is a page range that has capacity
@@ -126,10 +129,12 @@ class Query:
             current_base_page_index: int = base_page_indices[index]
             current_base_page: Page = page_range.pages[current_base_page_index]
             current_values = divided_columns[index]
-            current_base_page.write(self.table, LATEST_RECORD, schema_encoding, key, page_range_index, current_base_page_index, current_values)
+            current_base_page.write(self.table, LATEST_RECORD, key, schema_encoding, page_range_index, current_base_page_index, current_values)
         
         # increment rid
         self.table.current_rid += 1
+
+        return True
     
     """
     # Read matching record with specified search key
@@ -141,20 +146,31 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select(self, search_key, search_key_index, projected_columns_index):
+        
+        # get all records
         records: list[Record] = []
-        # records can span multiple base pages so split projected columns
-        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
-        smaller_projected_columns_index = self._get_divided_columns(projected_columns_index, max_size)
-        # index of smaller projected columns
-        current_smaller_projected_columns: int = 0
-        for rid in self.table.page_directory:
-            entries: list[Entry] = self.table.page_directory[rid]
-            for entry in entries:
-                if search_key == entry.cell_index and search_key_index == entry.column_index:
-                    record: Record = self.table.get_record(entries, smaller_projected_columns_index[current_smaller_projected_columns])
-                    current_smaller_projected_columns += 1
+        for key in self.table.key_to_rid:
+            list_of_rids = self.table.key_to_rid[key]
+            for rid in list_of_rids:
+                if rid != RECORD_DELETED:
+                    entries = self.table.page_directory[rid]
+                    record = self.table.get_record(rid, key, entries)
                     records.append(record)
-        return records
+        
+        selected_records: list[Record] = []
+        # select records that match search key and search key index
+        for record in records:
+            value = record.columns[search_key_index]
+            if value == search_key:
+                # use projected columns index to get what columns to return
+                projected_columns = []
+                for index in range(len(record.columns)):
+                    if projected_columns_index[index] == 1:
+                        projected_columns.append(record.columns[index])
+                projected_record = Record(record.rid, record.key, projected_columns)
+                selected_records.append(projected_record)
+
+        return selected_records
     
     """
     # Read matching record with specified search key
@@ -167,36 +183,21 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-        records: list[Record] = []
-        rids_visited = []
-        version = 0
-        # records can span multiple base pages so split projected columns
-        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
-        smaller_projected_columns_index = self._get_divided_columns(projected_columns_index, max_size)
-
-        current_smaller_projected_columns: int = 0
-        for rid in self.table.page_directory:
-            if rid in rids_visited:
-                continue
-
-            entries: list[Entry] = self.table.page_directory[rid]
-            # get number of indirections
-            num_columns: int = int(MAX_PAGE_SIZE / MAX_COLUMN_SIZE)
-            num_indirections = int((len(entries) // num_columns) + 1) # this is to ceiling the value
-
-            for index in range(num_indirections):
-                while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
-                    for entry in entries:
-                        if search_key == entry.cell_index and search_key_index == entry.column_index and version == relative_version:
-                            record: Record = self.table.get_record(entries, smaller_projected_columns_index[current_smaller_projected_columns])
-                            current_smaller_projected_columns += 1
-                            records.append(record)
-                        entries = self.table.page_directory[rid]
-                    version -= 1
-                    rids_visited.append(rid)
-                version = 0
+        records: list[Record] = self.select(search_key, search_key_index, projected_columns_index)
+        selected_records: list[Record] = []
+        for record in records:
+            version = self.table.get_version(record.rid, record.key)
+            if version == relative_version:
+                selected_records.append(record)
         
-        return records
+        # return a version greater than or equal to if version does not exist
+        if len(selected_records) == 0:
+            for record in records:
+                version = self.table.get_version(record.rid, record.key)
+                if version >= relative_version:
+                    selected_records.append(record)
+
+        return selected_records
     
     """
     # Update a record with specified key and columns
@@ -204,20 +205,42 @@ class Query:
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns):
+
+        # check if key exists
+        if primary_key not in self.table.key_to_rid:
+            return False
+
         # always do update on a base record
 
         rid = self.table.key_to_rid[primary_key][0] # first rid is the base record
         entries: list[Entry] = self.table.page_directory[rid]
 
-        columns = columns[KEY_INDEX+1:len(columns)] # remove key from columns
-
-        # update indirections
-
         # split values
-        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS)
+        max_size: int = int((MAX_PAGE_SIZE / MAX_COLUMN_SIZE) - NUM_SPECIFIED_COLUMNS - 1) # subtract one to make space for the key
         divided_columns = self._get_divided_columns(columns, max_size)
 
+        # get base record to update divided columns
+        base_record = self.table.get_record(rid, primary_key, entries)
+        base_divided_columns = self._get_divided_columns(base_record.columns, max_size)
+
+        # update values in divided columns
+        for i in range(len(divided_columns)):
+            for j in range(len(divided_columns[i])):
+                if divided_columns[i][j] == None:
+                    divided_columns[i][j] = base_divided_columns[i][j]
+
+        # update schema encoding
+        schema_encoding = ''
+        for index in range(len(base_record.columns)):
+            current_value = base_record.columns[index]
+            if current_value != base_record.columns[index]:
+                schema_encoding += '1'
+            else:
+                schema_encoding += '0'
+
         num_indirections = len(divided_columns)
+
+        # update indirections
 
         # get initial indirections
         initial_indirections = []
@@ -240,18 +263,6 @@ class Query:
                 else:
                     entries = self.table.page_directory[indirection]
 
-        # get base record
-        base_record = self.table.get_record(rid, primary_key, entries, None)
-
-        # update schema encoding
-        schema_encoding = ''
-        for index in range(len(base_record.columns)):
-            current_value = base_record.columns[index]
-            if current_value != columns[index]:
-                schema_encoding += '1'
-            else:
-                schema_encoding += '0'
-
         # insert new tail record
         page_range_index = entries[0].page_range_index
         page_range: PageRange = self.table.page_ranges[page_range_index]
@@ -266,10 +277,12 @@ class Query:
             current_tail_page_index: int = tail_page_indices[index]
             current_tail_page: Page = page_range.pages[current_tail_page_index]
             current_values = divided_columns[index]
-            current_tail_page.write(self.table, LATEST_RECORD, schema_encoding, primary_key, page_range_index, current_tail_page_index, current_values)
+            current_tail_page.write(self.table, LATEST_RECORD, primary_key, schema_encoding, page_range_index, current_tail_page_index, current_values)
         
         # increment rid
         self.table.current_rid += 1
+        
+        return True
     
     """
     :param start_range: int         # Start of the key range to aggregate 
@@ -280,16 +293,27 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum(self, start_range, end_range, aggregate_column_index):
-        for rid in self.table.page_directory:
-            entries: list[Entry] = self.table.page_directory[rid]
-            if rid == start_range:
-                sum = 0
-                while rid <= end_range:
-                    sum += self.table.get_value(entries[aggregate_column_index])
-                    rid += 1
-                    entries = self.table.page_directory[rid]
-                return sum
-        return False
+
+        # get records with a key in the range
+        records: list[Record] = []
+        for key in self.table.key_to_rid:
+            if key >= start_range and key <= end_range:
+                list_of_rids = self.table.key_to_rid[key]
+                for rid in list_of_rids:
+                    if rid != RECORD_DELETED:
+                        entries = self.table.page_directory[rid]
+                        record = self.table.get_record(rid, key, entries)
+                        records.append(record)
+
+        # return false if there are no records in the key range
+        if len(records) == 0:
+            return False
+
+        # get sum on the column index
+        sum = 0
+        for record in records:
+            sum += record.columns[aggregate_column_index]
+        return sum
     
     """
     :param start_range: int         # Start of the key range to aggregate 
@@ -301,28 +325,44 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
+
+        # get records with a key in the range
+        records: list[Record] = []
+        for key in self.table.key_to_rid:
+            if key >= start_range and key <= end_range:
+                list_of_rids = self.table.key_to_rid[key]
+                for rid in list_of_rids:
+                    if rid != RECORD_DELETED:
+                        # check version
+                        version = self.table.get_version(rid, key)
+                        if version == relative_version:
+                            entries = self.table.page_directory[rid]
+                            record = self.table.get_record(rid, key, entries)
+                            records.append(record)
+
+        # return a version greater than or equal to if version does not exist
+        if len(records) == 0:
+            records: list[Record] = []
+            for key in self.table.key_to_rid:
+                if key >= start_range and key <= end_range:
+                    list_of_rids = self.table.key_to_rid[key]
+                    for rid in list_of_rids:
+                        if rid != RECORD_DELETED:
+                            # check version
+                            version = self.table.get_version(rid, key)
+                            if version >= relative_version:
+                                entries = self.table.page_directory[rid]
+                                record = self.table.get_record(rid, key, entries)
+                                records.append(record)
+
+        # return false if there are no records in the key range
+        if len(records) == 0:
+            return False
+
+        # get sum on the column index
         sum = 0
-        rids_visited = []
-        version = 0
-        for rid in self.table.page_directory:
-            if rid in rids_visited:
-                continue
-
-            entries: list[Entry] = self.table.page_directory[rid]
-            # get number of indirections
-            num_columns: int = int(MAX_PAGE_SIZE / MAX_COLUMN_SIZE)
-            num_indirections = int((len(entries) // num_columns) + 1) # this is to ceiling the value
-
-            for index in range(num_indirections):
-                while self.table.get_value(entries[INDIRECTION_COLUMN + (index * num_columns)]) != LATEST_RECORD:
-                    for entry in entries:
-                        rid = self.table.get_value(entries[RID_COLUMN])
-                        if version == relative_version and rid <= start_range and rid >= end_range:
-                            sum += self.table.get_value(entries[aggregate_column_index])
-                        entries = self.table.page_directory[rid]
-                    version -= 1
-                    rids_visited.append(rid)
-                version = 0
+        for record in records:
+            sum += record.columns[aggregate_column_index]
         return sum
     
     """
