@@ -49,7 +49,7 @@ class Page:
         
         # put in rid for key
         if table.current_rid not in table.key_to_rid[key]:
-            table.key_to_rid[key].append(table.current_rid)
+            table.key_to_rid[key].insert(0, table.current_rid)
 
         # insert specified columns
         table.insert_int_to_column(desired_page, indirection, INDIRECTION_COLUMN)

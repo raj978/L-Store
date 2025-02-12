@@ -103,7 +103,7 @@ class Table:
         # page_ranges = {page_range_index : PageRange object}
         """
         self.page_ranges: dict[int : PageRange] = {}
-        self.key_to_rid: dict[int : int] = {} # maps key to rid
+        self.key_to_rid: dict[int : list[int]] = {} # maps key to rids
 
     def __merge(self):
         print("merge is happening")
@@ -183,7 +183,8 @@ class Table:
         return record
     
     def get_version(self, rid, key):
-        list_of_rids = self.key_to_rid[key] # key_to_rid = {key: [rid 1, rid 2, etc.]}
+        list_of_rids = self.key_to_rid[key] # key_to_rid = {key: [latest version, previous latest version, etc.]}
         for index in range(len(list_of_rids)):
             if rid == list_of_rids[index]:
-                return index * -1 # base record is 0, first tail record is -1, second tail record is -2, etc.
+                return index * -1 # latest version is 0, previous versions decrement by 1
+            

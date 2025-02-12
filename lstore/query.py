@@ -189,13 +189,15 @@ class Query:
         for record in records:
             version = self.table.get_version(record.rid, record.key)
             if version == relative_version:
+                # print(f'version selected: {version}')
                 selected_records.append(record)
         
         # return a version greater than or equal to if version does not exist
         if len(selected_records) == 0:
             for record in records:
                 version = self.table.get_version(record.rid, record.key)
-                if version >= relative_version:
+                if version == (len(self.table.key_to_rid[record.key]) - 1) * -1:
+                    # print(f'version selected: {version}')
                     selected_records.append(record)
 
         return selected_records
@@ -232,12 +234,12 @@ class Query:
 
         # update schema encoding
         schema_encoding = ''
-        for index in range(len(base_record.columns)):
-            current_value = base_record.columns[index]
-            if current_value != base_record.columns[index]:
-                schema_encoding += '1'
-            else:
-                schema_encoding += '0'
+        for i in range(len(divided_columns)):
+            for j in range(len(divided_columns[i])):
+                if divided_columns[i][j] != base_divided_columns[i][j]:
+                    schema_encoding += '1'
+                else:
+                    schema_encoding += '0'
 
         num_indirections = len(divided_columns)
 
@@ -265,7 +267,7 @@ class Query:
                     entries = self.table.page_directory[indirection]
 
         # insert new tail record
-        page_range_index = entries[0].page_range_index
+        page_range_index = entries[INDIRECTION_COLUMN].page_range_index
         page_range: PageRange = self.table.page_ranges[page_range_index]
 
         tail_page_indices = []
@@ -351,7 +353,9 @@ class Query:
                         if rid != RECORD_DELETED:
                             # check version
                             version = self.table.get_version(rid, key)
-                            if version >= relative_version:
+                            entries = self.table.page_directory[rid]
+                            record = self.table.get_record(rid, key, entries)
+                            if version == (len(self.table.key_to_rid[record.key]) - 1) * -1:
                                 entries = self.table.page_directory[rid]
                                 record = self.table.get_record(rid, key, entries)
                                 records.append(record)
