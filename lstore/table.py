@@ -139,7 +139,7 @@ class Table:
         val = bytearray(OFFSET)
         for index in range(OFFSET):
             val[index] = page.data[column + index]
-        return int.from_bytes(val, signed=is_negative)
+        return int.from_bytes(val, byteorder='big', signed=is_negative)
     
     """
     # Insert integer into a column where each column is 8 bytes
@@ -152,7 +152,7 @@ class Table:
             is_negative = False
             page.is_negative[column] = 0
         column *= OFFSET
-        value = value.to_bytes(OFFSET, signed=is_negative)
+        value = value.to_bytes(OFFSET, byteorder='big', signed=is_negative)
         for index in range(len(value)):
             page.data[column + index] = value[index]
 
