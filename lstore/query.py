@@ -107,26 +107,50 @@ class Query:
     # Assume that select will never be called on a key that doesn't exist
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
-            rid = self.table.index.locate(search_key_index, search_key)
-        # for rid in rids: 
-            baseRID = rid
-            frame_index = self.table.bufferpool.load_base_page(rid[0], rid[1], self.table.num_columns)
-            rid = self.table.bufferpool.frames[frame_index].indirection[rid[2]] # converts base page rid to tail rid if any, else remains same  
-            while relative_version != 0: 
-                if(rid[3] == 'b'):
-                    if(tuple(rid) != baseRID):
-                        frame_index = self.table.bufferpool.load_base_page(rid[0], rid[1], self.table.num_columns)
-                        rid = self.table.bufferpool.frames[frame_index].indirection[rid[2]]
-                else: 
-                    frame_index = self.table.bufferpool.load_tail_page(rid[0], rid[1], self.table.num_columns)
-                    rid = self.table.bufferpool.frames[frame_index].indirection[rid[2]]
-                relative_version += 1
-            records = []
-        # for rid in rids:
-            record = self.table.find_record(search_key, rid, projected_columns_index, [0,0])
-            records.append(record)
-            return records
-            pass
+        rid = self.table.index.locate(search_key_index, search_key)
+        if rid is None:
+            return []
+            
+        baseRID = rid
+        rid = self.table.page_directory[rid]
+        if rid is None:
+            return []
+            
+        frame_index = self.table.bufferpool.load_base_page(rid[0], rid[1], self.table.num_columns)
+        if frame_index is None:
+            return []
+            
+        # Get initial indirection
+        current_rid = self.table.bufferpool.frames[frame_index].indirection[rid[2]]
+        version = relative_version
+        
+        # Navigate version chain
+        while version != 0:
+            if current_rid[3] == 'b':
+                if tuple(current_rid) != baseRID:
+                    frame_index = self.table.bufferpool.load_base_page(current_rid[0], current_rid[1], self.table.num_columns)
+                    current_rid = self.table.bufferpool.frames[frame_index].indirection[current_rid[2]]
+            else:
+                frame_index = self.table.bufferpool.load_tail_page(current_rid[0], current_rid[1], self.table.num_columns)
+                current_rid = self.table.bufferpool.frames[frame_index].indirection[current_rid[2]]
+            version += 1
+            
+        # Get data from final frame
+        if current_rid[3] == 't':
+            frame_index = self.table.bufferpool.load_tail_page(current_rid[0], current_rid[1], self.table.num_columns)
+        else:
+            frame_index = self.table.bufferpool.load_base_page(current_rid[0], current_rid[1], self.table.num_columns)
+            
+        data = self.table.bufferpool.extractdata(frame_index, self.table.num_columns, current_rid[2])
+        
+        # Create record with projected columns
+        record = []
+        for i in range(len(projected_columns_index)):
+            if projected_columns_index[i] == 1:
+                record.append(data[i])
+                
+        return [Record(current_rid, search_key, record)]
+    
 
     
     """
@@ -180,32 +204,16 @@ class Query:
     """
     def sum(self, start_range, end_range, aggregate_column_index):
         """
-        Sum records with keys in range [start_range, end_range] inclusive, in aggregate_column
+        Sums the values in the aggregate_column for records with keys in range [start_range, end_range]
         """
-        rids = self.table.index.locate_range(start_range, end_range, self.table.key)
-        if not rids:
-            return 0
+        total = 0
+        keys = range(start_range, end_range + 1)
+        for key in keys:
+            records = self.select(key, 0, [1] * self.table.num_columns)
+            if records and len(records) > 0 and records[0]:
+                total += records[0].columns[aggregate_column_index]
+        return total
 
-        sum_result = 0
-        for rid in rids:
-            if rid in self.table.page_directory:
-                record_rid = self.table.page_directory[rid]
-                frame_index = self.table.bufferpool.load_base_page(record_rid[0], record_rid[1], self.table.num_columns)
-                if frame_index is not None:
-                    # Get current indirection
-                    current_indirection = self.table.bufferpool.frames[frame_index].indirection[record_rid[2]]
-                    # If record has been updated, use the tail record
-                    if current_indirection[3] == 't':
-                        frame_index = self.table.bufferpool.load_tail_page(current_indirection[0], current_indirection[1], self.table.num_columns)
-                        record_rid = current_indirection
-                        
-                    data = self.table.bufferpool.extractdata(frame_index, self.table.num_columns, record_rid[2])
-                    if data and len(data) > aggregate_column_index:
-                        sum_result += data[aggregate_column_index]
-
-        return sum_result
-
-    
     """
     :param start_range: int         # Start of the key range to aggregate 
     :param end_range: int           # End of the key range to aggregate 
@@ -216,33 +224,17 @@ class Query:
     # Returns False if no record exists in the given range
     """
     def sum_version(self, start_range, end_range, aggregate_column_index, relative_version):
-        rids = self.table.index.locate_range(start_range, end_range, self.table.key)
-        if not rids:
-            return 0
-
-        sum_result = 0
-        for rid in rids:
-            if rid in self.table.page_directory:
-                record_rid = self.table.page_directory[rid]
-                frame_index = self.table.bufferpool.load_base_page(record_rid[0], record_rid[1], self.table.num_columns)
-                if frame_index is not None:
-                    version = relative_version
-                    current_rid = record_rid
-                    
-                    while version < 0:
-                        current_indirection = self.table.bufferpool.frames[frame_index].indirection[current_rid[2]]
-                        if isinstance(current_indirection, tuple) and current_indirection[3] == 't':
-                            frame_index = self.table.bufferpool.load_tail_page(current_indirection[0], current_indirection[1], self.table.num_columns)
-                            current_rid = current_indirection
-                            version += 1
-                        else:
-                            break
-                            
-                    data = self.table.bufferpool.extractdata(frame_index, self.table.num_columns, current_rid[2])
-                    if data and len(data) > aggregate_column_index:
-                        sum_result += data[aggregate_column_index]
-
-        return sum_result
+        """
+        Sums the values in the aggregate_column for records with keys in range [start_range, end_range]
+        at the specified relative version
+        """
+        total = 0
+        keys = range(start_range, end_range + 1)
+        for key in keys:
+            records = self.select_version(key, 0, [1] * self.table.num_columns, relative_version)
+            if records and len(records) > 0 and records[0]:
+                total += records[0].columns[aggregate_column_index]
+        return total
 
     
     """
