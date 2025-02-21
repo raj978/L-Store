@@ -3,13 +3,7 @@ from lstore.page import Page, PageRange
 from time import time
 from lstore.bufferpool import *
 from lstore.lock import *
-import numpy as np
-
-TABLEKEY = 0
-TABLENUMCOL = 1
-TABLECURPG = 2
-TABLECURBP = 3
-TABLECURREC = 4
+from lstore.config import TABLEKEY, TABLENUMCOL, TABLECURPG, TABLECURBP, TABLECURREC
 
 class Record:
     def __init__(self, rid, key, columns):

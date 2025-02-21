@@ -1,8 +1,6 @@
-from pickle import FALSE, TRUE
+from lstore.config import FRAMECOUNT
 from lstore.page import Page, PageRange
 from datetime import datetime
-
-FRAMECOUNT = 100
 
 class Bufferpool:
     def __init__(self):

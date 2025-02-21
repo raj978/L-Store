@@ -1,6 +1,3 @@
-# UPDATE IN TESTING
-#
-# Following example in milestone1:
 # PAGE_SIZE = 4096 bytes
 # Base Page/ tail page has 1 page per column
 # Page Range has 16 base pages + any tail pages
@@ -8,16 +5,13 @@
 
 
 #for arrays and stuff
-import numpy as np
-
-MAX_RECORDS_PER_PAGE = 512
-MAX_BASEPAGES_PER_RANGE = 16
+from lstore.config import MAX_RECORDS_PER_PAGE, MAX_BASEPAGES_PER_RANGE, PAGE_SIZE
 
 #One Page for Every Column in Table (maybe 4k pages/columns per base page)
 class Page:
     def __init__(self):
         self.num_records = 0
-        self.data = bytearray(4096)  # 4096 bytes = 512 records * 8 bytes per record
+        self.data = bytearray(PAGE_SIZE)  # 4096 bytes = 512 records * 8 bytes per record
 
     def has_capacity(self):
         return self.num_records < MAX_RECORDS_PER_PAGE

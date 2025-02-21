@@ -11,3 +11,5 @@ env/
 .idea/
 .vscode/
 /ECS165/
+out.txt
+lstore.zip
