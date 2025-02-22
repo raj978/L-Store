@@ -10,3 +10,6 @@ env/
 .DS_Store
 .idea/
 .vscode/
+/ECS165/
+out.txt
+lstore.zip
