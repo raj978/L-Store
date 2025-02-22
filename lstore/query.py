@@ -158,14 +158,34 @@ class Query:
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
     def update(self, primary_key, *columns, rollback=False):
+        # Locate the record via the primary key index
         rid = self.table.index.locate(self.table.key, primary_key)
-        #Add values in columns to each index
+        if rid is None:
+            return False
+
+        # Retrieve the old record so we know what to remove
+        old_record = self.select(primary_key, self.table.key, [1] * self.table.num_columns)
+        if not old_record or len(old_record) == 0:
+            return False
+        old_record = old_record[0].columns
+
+        # Do not allow changing the primary key. (Assuming primary key is column 0)
+        if columns[0] is not None and columns[0] != primary_key:
+            return False
+
+        # For each column that is changed (i.e. new value is not None)
         for i in range(len(columns)):
-            self.table.index.indices[i][columns[i]] = rid
-            #Need to delete the key:rid prior to update
-        if(rollback == True):
+            if columns[i] is not None:
+                # First remove the old mapping for this column value if it exists
+                if old_record[i] in self.table.index.indices[i]:
+                    del self.table.index.indices[i][old_record[i]]
+                # Then add the new mapping: note that for nonprimary columns,
+                # this index entry may already exist but should be updated to point to this record.
+                self.table.index.indices[i][columns[i]] = rid
+
+        if rollback:
             self.rollBackUpdate(primary_key, *columns)
-        else:    
+        else:
             BaseRID = rid
             rid = self.table.page_directory[rid]
             self.table.updateRec(rid, BaseRID, primary_key, *columns)
