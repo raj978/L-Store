@@ -16,3 +16,4 @@ TABLECURREC = 4
 
 # Bufferpool constants
 FRAMECOUNT = 100  # Maximum number of frames in bufferpool
+MERGE_INTERVAL = 60  # seconds between merge operations

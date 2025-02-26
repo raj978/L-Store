@@ -1,206 +1,142 @@
-from lstore.config import FRAMECOUNT
+from lstore.config import *
 from lstore.page import Page, PageRange
 from datetime import datetime
+import pickle
+import os
 
 class Bufferpool:
     def __init__(self):
         self.frames = []
         self.numFrames = 0
         self.frame_directory = []
-        self.frame_info = [None] * 100
-        self.page_ranges = {}  # In-memory storage of page ranges
+        self.frame_info = [None] * FRAMECOUNT
+        self.page_ranges = {}
+        self.table_directories = {}
+
+    def start_table_dir(self, tablename, numcols):
+        self.table_directories[tablename] = {"numcols": numcols, "page_ranges": {}}
 
     def has_capacity(self):
         return self.numFrames < FRAMECOUNT
 
-    def allocate_page_range(self, num_columns, page_range_index):
-        # Create new page range in memory
-        if page_range_index not in self.page_ranges:
-            self.page_ranges[page_range_index] = PageRange(num_columns)
-            # Pre-initialize base pages
-            for i in range(16):  # MAX_BASEPAGES_PER_RANGE
-                d_key = (page_range_index, i, 'b')
-                frame_index = self.get_empty_frame(num_columns)
-                self.frame_info[frame_index] = d_key
-                self.frames[frame_index].frameData = [Page() for _ in range(num_columns)]
-        return self.page_ranges[page_range_index]
-
-    def get_frame_index(self, key_directory):
-        # First check if frame exists
+    def get_frame_index(self, key_directory, table_name):
         for i in range(len(self.frame_info)):
-            if self.frame_info[i] == key_directory:
+            if self.frame_info[i] == (key_directory, table_name):
                 return i
-        
-        # If not found, create a new frame
-        page_range = self.page_ranges.get(key_directory[0])
-        if not page_range:
-            return None
-            
-        frame_index = self.get_empty_frame(page_range.basePages[0].num_cols if page_range.basePages else 0)
-        self.frame_info[frame_index] = key_directory
-        return frame_index
+        return None
+
+    def in_pool(self, key, table_name):
+        return self.get_frame_index(key, table_name) is not None
 
     def LRU(self):
-        evict_index = 0
-        for i in range(len(self.frames) - 1):
-            if self.frames[i].lastAccess > self.frames[i + 1].lastAccess:
-                if self.frames[i + 1].isPinned() == False:
-                    evict_index = i + 1
-        return evict_index
-    
-    def evict_page(self):
-        return self.LRU()
+        lru_time = datetime.max
+        lru_index = 0
+        for i in range(self.numFrames):
+            if not self.frames[i].isPinned() and self.frames[i].lastAccess < lru_time:
+                lru_time = self.frames[i].lastAccess
+                lru_index = i
+        return lru_index
 
-    def get_empty_frame(self, numColumns):
+    def evict_page(self, table_name):
+        index = self.LRU()
+        frame = self.frames[index]
+        if frame.dirtyBit:
+            self.write_to_disk(index, table_name)
+        return index
+
+    def get_empty_frame(self, numColumns, table_name):
         if not self.has_capacity():
-            frame_index = self.evict_page()
+            frame_index = self.evict_page(table_name)
             self.frames[frame_index] = Frame(numColumns)
+            self.frame_info[frame_index] = None
         else:
             frame_index = self.numFrames
             self.frames.append(Frame(numColumns))
             self.numFrames += 1
         return frame_index
 
-    def load_base_page(self, page_range_index, base_page_index, numColumns):
-        d_key = (page_range_index, base_page_index, 'b')
-        if self.in_pool(d_key):
-            return self.get_frame_index(d_key)
-
-        frame_index = self.get_empty_frame(numColumns)
-        cur_frame = self.frames[frame_index]
-        cur_frame.pin_page()
-        self.frame_info[frame_index] = d_key
+    def write_to_disk(self, frame_index, table_name):
+        frame = self.frames[frame_index]
+        key_directory, _ = self.frame_info[frame_index]
+        page_range_index, page_index, page_type = key_directory
         
-        # Get data from in-memory page range
-        if page_range_index in self.page_ranges:
-            page_range = self.page_ranges[page_range_index]
-            if base_page_index < len(page_range.basePages):
-                base_page = page_range.basePages[base_page_index]
-                for i in range(numColumns):
-                    cur_frame.frameData[i] = base_page.pages[i]
+        directory = self.table_directories[table_name]
+        path = f"./ECS165/tables/{table_name}/pagerange{page_range_index}"
+        if not os.path.exists(path):
+            os.makedirs(path)
             
-        cur_frame.unpin_page()
+        filename = f"{path}/{'base' if page_type == 'b' else 'tail'}{page_index}.pkl"
+        with open(filename, 'wb') as f:
+            pickle.dump({
+                'data': frame.frameData,
+                'rid': frame.rid,
+                'indirection': frame.indirection,
+                'schema': frame.schema_encoding,
+                'start_time': frame.start_time,
+                'TPS': frame.TPS,
+                'numRecords': frame.numRecords
+            }, f)
+
+    def read_from_disk(self, key_directory, table_name):
+        page_range_index, page_index, page_type = key_directory
+        path = f"./ECS165/tables/{table_name}/pagerange{page_range_index}"
+        filename = f"{path}/{'base' if page_type == 'b' else 'tail'}{page_index}.pkl"
+        
+        if not os.path.exists(filename):
+            return None
+            
+        with open(filename, 'rb') as f:
+            data = pickle.load(f)
+            return data
+
+    def load_page(self, page_range_index, page_index, page_type, table_name):
+        key_directory = (page_range_index, page_index, page_type)
+        frame_index = self.get_frame_index(key_directory, table_name)
+        
+        if frame_index is not None:
+            self.frames[frame_index].pin_page()
+            return frame_index
+            
+        directory = self.table_directories[table_name]
+        frame_index = self.get_empty_frame(directory["numcols"], table_name)
+        
+        data = self.read_from_disk(key_directory, table_name)
+        if data:
+            frame = self.frames[frame_index]
+            frame.frameData = data['data']
+            frame.rid = data['rid']
+            frame.indirection = data['indirection']
+            frame.schema_encoding = data['schema']
+            frame.start_time = data['start_time']
+            frame.TPS = data['TPS']
+            frame.numRecords = data['numRecords']
+            
+        self.frame_info[frame_index] = (key_directory, table_name)
+        self.frames[frame_index].pin_page()
         return frame_index
 
-    def load_tail_page(self, page_range_index, tail_page_index, numColumns):
-        d_key = (page_range_index, tail_page_index, 't')
-        
-        # Check if page range exists
-        if page_range_index not in self.page_ranges:
-            self.allocate_page_range(numColumns, page_range_index)
-            
-        page_range = self.page_ranges[page_range_index]
-        
-        # Create tail page if it doesn't exist
-        while len(page_range.tailPages) <= tail_page_index:
-            page_range.add_tail_page(numColumns)
-        
-        frame_index = self.get_frame_index(d_key)
-        if frame_index is None:
-            frame_index = self.get_empty_frame(numColumns)
-            self.frame_info[frame_index] = d_key
-        
-        cur_frame = self.frames[frame_index]
-        cur_frame.pin_page()
-        
-        # Initialize frame data if needed
-        if cur_frame.frameData[0] is None:
-            tail_page = page_range.tailPages[tail_page_index]
-            cur_frame.frameData = [Page() for _ in range(numColumns)]
-            for i in range(numColumns):
-                cur_frame.frameData[i] = tail_page.pages[i]
-        
-        cur_frame.unpin_page()
-        return frame_index
+    def close(self, table_name):
+        for i in range(self.numFrames):
+            if self.frame_info[i] and self.frame_info[i][1] == table_name:
+                if self.frames[i].dirtyBit:
+                    self.write_to_disk(i, table_name)
 
-    def in_pool(self, key):
-        for i in range(len(self.frame_info)):
-            if self.frame_info[i] == key:
-                return True
-        return False
-
-    def insertRecBP(self, RID, start_time, schema_encoding, indirection, *columns, numColumns):
-        frame_index = self.get_frame_index((RID[0], RID[1], 'b'))
-        cur_frame = self.frames[frame_index]
-        cur_frame.pin_page()
+    def allocate_page_range(self, num_columns, page_range_index, table_name):
+        # Initialize base pages
+        for i in range(MAX_BASEPAGES_PER_RANGE):
+            frame_index = self.get_empty_frame(num_columns, table_name)
+            self.frame_info[frame_index] = ((page_range_index, i, 'b'), table_name)
+            frame = self.frames[frame_index]
+            for j in range(num_columns):
+                frame.frameData[j] = Page()
         
-        for i in range(numColumns):
-            if cur_frame.frameData[i] is None:
-                cur_frame.frameData[i] = Page()
-            cur_frame.frameData[i].write(columns[i])
-            
-        cur_frame.numRecords += 1
-        cur_frame.rid.append(RID)
-        cur_frame.start_time.append(start_time)
-        cur_frame.schema_encoding.append(schema_encoding)
-        cur_frame.indirection.append(indirection)
-        cur_frame.unpin_page()
-
-    def insertRecTP(self, record, rid, updateRID, currentRID, baseRID, curFrameIndexBP, *columns):
-        # First ensure the tail page exists
-        frame_index = self.load_tail_page(updateRID[0], updateRID[1], len(columns))
+        # Initialize first tail page
+        frame_index = self.get_empty_frame(num_columns, table_name)
+        self.frame_info[frame_index] = ((page_range_index, 0, 't'), table_name)
+        frame = self.frames[frame_index]
+        for j in range(num_columns):
+            frame.frameData[j] = Page()
         
-        cur_frame = self.frames[frame_index]
-        base_frame = self.frames[curFrameIndexBP]
-        
-        cur_frame.pin_page()
-        base_frame.pin_page()
-        
-        schema = ''
-        for j in range(len(columns)):
-            if columns[j] is not None:
-                if cur_frame.frameData[j] is None:
-                    cur_frame.frameData[j] = Page()
-                cur_frame.frameData[j].write(columns[j])
-                schema += '1'
-                base_frame.schema_encoding[j] = 1
-            else:
-                if cur_frame.frameData[j] is None:
-                    cur_frame.frameData[j] = Page()
-                cur_frame.frameData[j].write(record.columns[j])
-                schema += '0'
-                
-        cur_frame.schema_encoding.append(schema)
-        cur_frame.numRecords += 1
-        cur_frame.indirection.append(currentRID)
-        cur_frame.BaseRID.append(baseRID)
-        cur_frame.rid.append(updateRID)
-        
-        base_frame.indirection[rid[2]] = updateRID
-        
-        cur_frame.unpin_page()
-        base_frame.unpin_page()
-
-    def extractdata(self, frame_index, num_columns, recordnumber):
-        data = []
-        cur_frame = self.frames[frame_index]
-        for i in range(num_columns):
-            if cur_frame.frameData[i] is not None:
-                data.append(cur_frame.frameData[i].get_value(recordnumber))
-            else:
-                data.append(0)  # Default value for missing data
-        return data
-
-    def extractTPS(self, key_directory, num_columns):
-        frame_index = self.get_frame_index(key_directory)
-        cur_frame = self.frames[frame_index]
-        try:
-            if len(cur_frame.frameData) >= num_columns + 11:
-                x = cur_frame.frameData[num_columns + 10].get_value(0)
-                y = cur_frame.frameData[num_columns + 10].get_value(1)
-            else:
-                x = y = 0
-        except:
-            x = y = 0
-        return [x, y]
-
-    def close(self):
-        self.frames = []
-        self.numFrames = 0
-        self.frame_directory = []
-        self.frame_info = [None] * 100
-        self.page_ranges = {}
-
 class Frame:
     def __init__(self, numColumns):
         self.frameData = [None] * numColumns
@@ -210,27 +146,20 @@ class Frame:
         self.start_time = []
         self.schema_encoding = []
         self.indirection = []
-        self.BaseRID = []
         self.dirtyBit = False
         self.pinNum = 0
         self.numColumns = numColumns
-        self.lastAccess = 0
+        self.lastAccess = datetime.now()
 
     def has_capacity(self):
-        if self.numRecords < 512:
-            return True
-        else: 
-            return False
-        
+        return self.numRecords < 512
+
     def pin_page(self):
         self.pinNum += 1
         self.lastAccess = datetime.now()
 
     def unpin_page(self):
-        self.pinNum -= 1
+        self.pinNum = max(0, self.pinNum - 1)
 
     def isPinned(self):
-        if self.pinNum == 0:
-            return False
-        else:
-            return True
+        return self.pinNum > 0

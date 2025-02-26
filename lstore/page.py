@@ -12,24 +12,46 @@ class Page:
     def __init__(self):
         self.num_records = 0
         self.data = bytearray(PAGE_SIZE)  # 4096 bytes = 512 records * 8 bytes per record
+        # Removed list initialization to keep bytearray
 
     def has_capacity(self):
         return self.num_records < MAX_RECORDS_PER_PAGE
 
     def write(self, value):
-        self.data[self.num_records * 8:(self.num_records + 1) * 8] = int(value).to_bytes(8, byteorder='big')
+        if value is None:
+            value = 0
+        # Convert value to 8-byte representation and store at the correct offset
+        start = self.num_records * 8
+        end = start + 8
+        self.data[start:end] = int(value).to_bytes(8, byteorder='big', signed=True)
         self.num_records += 1
         
     def find_value(self, value):
         indexes = []
         for i in range(MAX_RECORDS_PER_PAGE):
-            cur_val = int.from_bytes(self.data[i*8:(i+1)*8], byteorder='big')
+            start = i * 8
+            end = start + 8
+            cur_val = int.from_bytes(self.data[start:end], byteorder='big')
             if cur_val == value:
                 indexes.append(i)
         return indexes
         
     def get_value(self, index):
-        return int.from_bytes(self.data[index*8:(index + 1)*8], 'big')
+        if index < self.num_records:
+            start = index * 8
+            end = start + 8
+            return int.from_bytes(self.data[start:end], byteorder='big')
+        return None
+
+    def update(self, index, value):
+        if value is None:
+            value = 0
+        start = index * 8
+        end = start + 8
+        # If index is out of current records, extend num_records accordingly
+        if index >= self.num_records:
+            self.num_records = index + 1
+        self.data[start:end] = int(value).to_bytes(8, byteorder='big', signed=True)
 
 class BasePage:
     def __init__(self, numCols):
