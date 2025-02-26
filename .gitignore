@@ -13,3 +13,5 @@ env/
 /ECS165/
 out.txt
 lstore.zip
+.DS_Store
+out.txt

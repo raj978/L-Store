@@ -33,7 +33,7 @@ class Bufferpool:
     def get_frame_index(self, key_directory):
         # First check if frame exists
         for i in range(len(self.frame_info)):
-            if self.frame_info[i] == key_directory:
+            if self.frame_info[i] == (key_directory, table_name):
                 return i
 
         page_range_index, page_index, mark = key_directory
@@ -67,8 +67,9 @@ class Bufferpool:
 
     def get_empty_frame(self, numColumns):
         if not self.has_capacity():
-            frame_index = self.evict_page()
+            frame_index = self.evict_page(table_name)
             self.frames[frame_index] = Frame(numColumns)
+            self.frame_info[frame_index] = None
         else:
             frame_index = self.numFrames
             self.frames.append(Frame(numColumns))
@@ -319,7 +320,7 @@ class Frame:
         self.lastAccess = datetime.now()
 
     def unpin_page(self):
-        self.pinNum -= 1
+        self.pinNum = max(0, self.pinNum - 1)
 
     def is_pinned(self):
         if self.pinNum == 0:
