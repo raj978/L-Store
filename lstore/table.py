@@ -81,7 +81,11 @@ class Table:
             self.insertRollback(*columns)
             return
         
+
+
         self.curFrameIndexBP = self.bufferpool.load_page(self.curPageRange, self.curBP, 'b', self.name)
+        
+        
         RID = self.createBP_RID()
         self.page_directory[RID] = RID
         indirection = RID
@@ -94,7 +98,8 @@ class Table:
             
         record_index = self.curRecord % MAX_RECORDS_PER_PAGE
         # RID Error fixing
-
+        if self.curRecord  >= MAX_RECORDS_PER_PAGE:
+            self.curRecord = 0
         # Initialize lists if they are None
         if cur_frame.rid is None:
             cur_frame.rid = [None] * MAX_RECORDS_PER_PAGE
@@ -194,6 +199,7 @@ class Table:
         # Update tail record data
         schema = ''
         for j in range(len(columns)):
+
             if tail_frame.frameData[j] is None:
                 tail_frame.frameData[j] = Page()
                 
@@ -209,7 +215,9 @@ class Table:
                     cur_frame.unpin_page()
                 else:
                     value = base_frame.frameData[j].get_value(currentRID[2])
+                    print(value)
                 tail_frame.frameData[j].write(value)
+
                 schema += '0'
         # RiD error fixing
         # Ensure arrays are not None
