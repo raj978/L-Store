@@ -19,7 +19,7 @@ class Database:
         self.tables: list[Table] = []
         self.tablenames = []
         self.bufferpool: Optional[Bufferpool] = None
-        self.path = '.'
+        self.path = './ECS165'
         self.tables_path = self.path + "/tables"
 
     def open(self, path):
