@@ -33,7 +33,7 @@ class Bufferpool:
     def get_frame_index(self, key_directory):
         # First check if frame exists
         for i in range(len(self.frame_info)):
-            if self.frame_info[i] == (key_directory, table_name):
+            if self.frame_info[i] == key_directory:
                 return i
 
         page_range_index, page_index, mark = key_directory
