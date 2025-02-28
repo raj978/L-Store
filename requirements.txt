@@ -1,1 +1,2 @@
-colorama
+colorama==0.4.4
+BTrees==4.8.0

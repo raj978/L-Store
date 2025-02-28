@@ -5,13 +5,7 @@ import struct
 
 from lstore.bufferpool import *
 from lstore.table import Table
-
-TABLEKEY = 0
-TABLENUMCOL = 1
-TABLECURPG = 2
-TABLECURBP = 3
-TABLECURREC = 4
-
+from lstore.config import *
 
 class Database:
 
