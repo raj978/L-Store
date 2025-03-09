@@ -8,6 +8,9 @@ class Transaction:
     """
     def __init__(self):
         self.queries = []
+        self.locks = [] # array of Locks
+        # loop through Lock Manager, if the Lock matches then delete
+        self.log = []
         pass
 
     """
@@ -25,6 +28,9 @@ class Transaction:
     # If you choose to implement this differently this method must still return True if transaction commits or False on abort
     def run(self):
         for query, args in self.queries:
+            
+            # add the query to the log
+
             result = query(*args)
             # If the query has failed the transaction should abort
             if result == False:
@@ -34,10 +40,15 @@ class Transaction:
     
     def abort(self):
         #TODO: do roll-back and any other necessary operations
+        # refer to the log and undo the transaction
+        # call the transaction again
         return False
 
     
     def commit(self):
         # TODO: commit to database
+
+        # release all locks
+
         return True
 

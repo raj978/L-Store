@@ -7,6 +7,7 @@ from lstore.bufferpool import Bufferpool
 from lstore.config import *
 from lstore.index import Index
 from lstore.page import *
+from lstore.lock_manager import LockManager
 
 
 class Record:
@@ -37,6 +38,8 @@ class Table:
 
         if not os.path.exists(f"{self.path}/{self.name}"):
             os.mkdir(f"{self.path}/{self.name}")
+
+        self.lock_manager = LockManager()
 
     def add_page_range(self, numCols):
 
@@ -84,7 +87,11 @@ class Table:
         return self.bufferpool.frames[15].numRecords < MAX_RECORDS_PER_PAGE
 
     def insertRec(self, start_time, schema_encoding, *columns):
-        # print(f"inserting record with start_time: {start_time}, schema_encoding: {schema_encoding}, columns: {columns}")
+
+        # if self.base_page_index locked then abort
+
+        # acquire x lock for record and ix for page
+
         self.base_page_frame_index = self.bufferpool.get_frame_index((self.page_range_index, self.base_page_index, 'b'))
         if self.base_page_frame_index is None:
             raise Exception(f"Error: Could not find frame for base page with index {self.base_page_index}")
@@ -110,6 +117,10 @@ class Table:
 
     def updateRec(self, current_rid, *columns):
         page_range_index, page_index, record_id, mark = current_rid
+    
+        # if page_index locked then abort
+
+        # acquire x lock for record and ix for page
 
         # Load base page
         self.base_page_frame_index = self.bufferpool.get_frame_index((page_range_index, page_index, 'b'))
@@ -147,8 +158,6 @@ class Table:
         # Create new tail record RID
         new_rid = (page_range_index, numTPS, tail_frame.numRecords, 't')
         self.bufferpool.insertRecTP(new_rid, current_rid, origin_rid, self.base_page_frame_index, *origin_columns)
-
-        # print(f"new_columns: {new_columns}, origin_columns: {origin_columns}")
 
         # Update page directory
         self.page_directory[new_rid] = None
@@ -309,6 +318,11 @@ class Table:
                         self.bufferpool.load_page((page_range_index, tp_index, None, 't'))
 
     def get_record(self, rid):
+
+        # if page_index locked then abort
+
+        # acquire s lock for record and is for page
+
         if rid not in self.page_directory:
             return None
 
@@ -324,6 +338,11 @@ class Table:
         return Record(rid, record_columns[self.key], record_columns)
 
     def get_record_version(self, rid, version):
+
+        # if page_index locked then abort
+
+        # acquire s lock for record and is for page
+
         if rid not in self.page_directory:
             return None
 
