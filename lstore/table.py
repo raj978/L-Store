@@ -7,7 +7,7 @@ from lstore.bufferpool import Bufferpool
 from lstore.config import *
 from lstore.index import Index
 from lstore.page import *
-from lstore.lock_manager import LockManager
+from lstore.lock_manager import lockEntry, LockManager
 
 
 class Record:
@@ -87,11 +87,6 @@ class Table:
         return self.bufferpool.frames[15].numRecords < MAX_RECORDS_PER_PAGE
 
     def insertRec(self, start_time, schema_encoding, *columns):
-
-        # if self.base_page_index locked then abort
-
-        # acquire x lock for record and ix for page
-
         self.base_page_frame_index = self.bufferpool.get_frame_index((self.page_range_index, self.base_page_index, 'b'))
         if self.base_page_frame_index is None:
             raise Exception(f"Error: Could not find frame for base page with index {self.base_page_index}")
@@ -99,6 +94,13 @@ class Table:
         RID = self.createBP_RID()
         self.page_directory[RID] = None
         origin_rid = RID
+
+        # if record locked then abort
+        if lockEntry(RID, 's') in self.lock_manager.locks.keys() or lockEntry(RID, 'x') in self.lock_manager.locks.keys():
+            return False
+
+        # acquire x lock for record
+        self.lock_manager.locks[lockEntry(RID, 'x')]
 
         cur_frame = self.bufferpool.insertRecBP(RID, start_time, schema_encoding, origin_rid, *columns, numColumns=self.num_columns)
         self.updateCurRecord()
@@ -118,9 +120,12 @@ class Table:
     def updateRec(self, current_rid, *columns):
         page_range_index, page_index, record_id, mark = current_rid
     
-        # if page_index locked then abort
+        # if record locked then abort
+        if lockEntry(current_rid, 's') in self.lock_manager.locks.keys() or lockEntry(current_rid, 'x') in self.lock_manager.locks.keys():
+            return False
 
-        # acquire x lock for record and ix for page
+        # acquire x lock for record
+        self.lock_manager.locks[lockEntry(current_rid, 'x')]
 
         # Load base page
         self.base_page_frame_index = self.bufferpool.get_frame_index((page_range_index, page_index, 'b'))
@@ -319,9 +324,13 @@ class Table:
 
     def get_record(self, rid):
 
-        # if page_index locked then abort
+        # if record locked then abort
+        # s is not compatible with x
+        if lockEntry(rid, 'x') in self.lock_manager.locks.keys():
+            return False
 
-        # acquire s lock for record and is for page
+        # acquire s lock for record
+        self.lock_manager.locks[lockEntry(rid, 's')]
 
         if rid not in self.page_directory:
             return None
@@ -339,9 +348,13 @@ class Table:
 
     def get_record_version(self, rid, version):
 
-        # if page_index locked then abort
+        # if record locked then abort
+        # s is not compatible with x
+        if lockEntry(rid, 'x') in self.lock_manager.locks.keys():
+            return False
 
-        # acquire s lock for record and is for page
+        # acquire s lock for record
+        self.lock_manager.locks[lockEntry(rid, 's')]
 
         if rid not in self.page_directory:
             return None

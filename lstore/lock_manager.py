@@ -1,7 +1,7 @@
 class lockEntry:
     def __init__(self, rid, lock):
         self.rid = rid
-        self.lockInfo = lock # (type, level)
+        self.lockInfo = lock
 
 class LockManager:
     def __init__(self):
