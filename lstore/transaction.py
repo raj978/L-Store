@@ -57,7 +57,7 @@ class Transaction:
             if result == False:
                 return self.abort()
             # append recently added lock
-            self.locks.append(self.table.lock_manager.locks.keys()[len(self.table.lock_manager.locks)-1])
+            self.lock_entries.append(list(self.table.lock_manager.locks.keys())[len(self.table.lock_manager.locks)-1])
         return self.commit()
 
     
@@ -65,7 +65,7 @@ class Transaction:
         #TODO: do roll-back and any other necessary operations
         # release all locks just acquired
         for lock_entry in self.lock_entries:
-            if lock_entry in self.table.lock_manager.locks.values():
+            if lock_entry in self.table.lock_manager.locks.keys():
                 del self.table.lock_manager.locks[lock_entry]
         for query in self.queries:
             query.table = self.old_table
@@ -78,7 +78,7 @@ class Transaction:
 
         # release all locks
         for lock_entry in self.lock_entries:
-            if lock_entry in self.table.lock_manager.locks.values():
+            if lock_entry in self.table.lock_manager.locks.keys():
                 del self.table.lock_manager.locks[lock_entry]
 
         return True

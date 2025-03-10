@@ -8,6 +8,7 @@ from lstore.config import *
 from lstore.index import Index
 from lstore.page import *
 from lstore.lock_manager import lockEntry, LockManager
+from lstore.lock import Lock
 
 
 class Record:
@@ -100,7 +101,7 @@ class Table:
             return False
 
         # acquire x lock for record
-        self.lock_manager.locks[lockEntry(RID, 'x')]
+        self.lock_manager.locks[lockEntry(RID, 'x')] = Lock()
 
         cur_frame = self.bufferpool.insertRecBP(RID, start_time, schema_encoding, origin_rid, *columns, numColumns=self.num_columns)
         self.updateCurRecord()
@@ -125,7 +126,7 @@ class Table:
             return False
 
         # acquire x lock for record
-        self.lock_manager.locks[lockEntry(current_rid, 'x')]
+        self.lock_manager.locks[lockEntry(current_rid, 'x')] = Lock()
 
         # Load base page
         self.base_page_frame_index = self.bufferpool.get_frame_index((page_range_index, page_index, 'b'))
@@ -330,7 +331,7 @@ class Table:
             return False
 
         # acquire s lock for record
-        self.lock_manager.locks[lockEntry(rid, 's')]
+        self.lock_manager.locks[lockEntry(rid, 's')] = Lock()
 
         if rid not in self.page_directory:
             return None
@@ -354,7 +355,7 @@ class Table:
             return False
 
         # acquire s lock for record
-        self.lock_manager.locks[lockEntry(rid, 's')]
+        self.lock_manager.locks[lockEntry(rid, 's')] = Lock()
 
         if rid not in self.page_directory:
             return None
