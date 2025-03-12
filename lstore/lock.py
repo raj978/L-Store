@@ -13,7 +13,7 @@ class Lock:
         self.shared_lock.acquire()
         if self.write_count == 0:
             self.read_count += 1
-            self.exclusive_lock.release()
+            self.shared_lock.release()
             return True
         else:
             self.shared_lock.release()
@@ -24,7 +24,7 @@ class Lock:
         self.exclusive_lock.acquire()
         if self.write_count == 0 and self.read_count == 0:
             self.write_count += 1
-            self.shared_lock.release()
+            self.exclusive_lock.release()
             return True
         else:
             self.exclusive_lock.release()
@@ -32,8 +32,10 @@ class Lock:
         
     def release_read_lock(self):
         self.read_count -= 1
-        self.shared_lock.release()
+        if self.shared_lock.locked():
+            self.shared_lock.release()
 
     def release_write_lock(self):
         self.write_count -= 1
-        self.exclusive_lock.release()
+        if self.exclusive_lock.locked():
+            self.exclusive_lock.release()

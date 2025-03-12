@@ -42,17 +42,17 @@ class Transaction:
             self.lock_entries.append(self.table.recently_added_lock_entry)
 
             # for insert abort
-            if not self.table.recently_inserted_rid:
-                self.rids_inserted.append(self.table.recently_inserted_rid.copy())
+            if self.table.recently_inserted_rid:
+                self.rids_inserted.append(self.table.recently_inserted_rid)
                 self.table.recently_inserted_rid = None
             
             # for update abort
-            if not self.table.recently_updated_rid:
-                self.rids_updated.append(self.table.recently_updated_rid.copy())
+            if self.table.recently_updated_rid:
+                self.rids_updated.append(self.table.recently_updated_rid)
                 self.table.recently_updated_rid = None
 
             # for delete abort
-            if not self.table.deleted_columns:
+            if self.table.deleted_columns:
                 self.deleted.append(self.table.deleted_columns.copy())
                 self.table.deleted_columns = None
             
@@ -93,7 +93,6 @@ class Transaction:
     
     def commit(self):
         # TODO: commit to database
-
         # release all locks
         for lock_entry in self.lock_entries:
             if lock_entry in self.table.lock_manager.locks.keys():
