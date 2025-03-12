@@ -1,6 +1,7 @@
 from lstore.table import Table, Record
 from lstore.index import Index
 import threading
+from lstore.lock_manager import lockEntry
 
 class Query:
     """
@@ -31,8 +32,30 @@ class Query:
     def delete(self, primary_key):
         rid = self.table.index.locate(0, primary_key)[0]
         if rid:
+            # if record locked then abort
+            # x is not compatible with s or x
+            if lockEntry(rid, 's') in self.lock_manager.locks.keys() or lockEntry(rid, 'x') in self.lock_manager.locks.keys():
+                return False
+
+            # acquire x lock for record
+            lock_entry = lockEntry(rid, 'x')
+            self.lock_manager.insert_lock(lock_entry)
+            self.recently_added_lock_entry = lock_entry
+
+            # add to deleted columns
+            version = 0
+            record = self.table.get_version_record(rid, version)
+            self.table.deleted_columns.append(record.columns)
+            version -= 1
+            new_record = self.table.get_version_record(rid, version)
+            while record.rid != new_record.rid:
+                self.table.deleted_columns.append(record.columns)
+                record.rid = new_record.rid
+                new_record = self.table.get_version_record(rid, version)
+
             self.table.page_directory.pop(rid, None)
             self.table.index.delete_node(0, primary_key, rid)
+
             return True
         return False
 

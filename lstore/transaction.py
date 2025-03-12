@@ -1,7 +1,7 @@
 from lstore.table import Table, Record
 from lstore.index import Index
 from lstore.config import *
-from lstore.bufferpool import Bufferpool
+from lstore.query import Query
 
 class Transaction:
 
@@ -10,10 +10,12 @@ class Transaction:
     """
     def __init__(self):
         self.queries = []
-        self.lock_entries = [] # array of lock entries
-        # loop through Lock Manager, if the Lock matches then delete
+        self.num_queries_executed = 0
+        self.lock_entries = [] # loop through Lock Manager, if the Lock matches then delete
+        self.rids_inserted = []
+        self.rids_updated = []
+        self.deleted = []
         self.table = None
-        self.old_table = None
         pass
 
     """
@@ -25,28 +27,8 @@ class Transaction:
     """
     def add_query(self, query, table, *args):
         self.queries.append((query, args))
-        # save state of table before transaction
-        bufferpool = Bufferpool(table.bufferpool.path)
-        bufferpool.frames = list(table.bufferpool.frames)
-        bufferpool.numFrames = table.bufferpool.numFrames
-        bufferpool.frame_directory = list(table.bufferpool.frame_directory)
-        bufferpool.frame_info = list(table.bufferpool.frame_info)
-        bufferpool.page_ranges = dict(table.bufferpool.page_ranges)
-        bufferpool.path = table.bufferpool.path
-        self.old_table = Table(table.name, table.num_columns, table.key, bufferpool, False, table.path)
-        self.old_table.page_directory = dict(table.page_directory)
-        self.old_table.num_pageRanges = table.num_pageRanges
-        self.old_table.page_range_index = table.page_range_index
-        self.old_table.base_page_index = table.base_page_index
-        self.old_table.record_id = table.record_id
-        self.old_table.base_page_frame_index = table.base_page_frame_index
-        self.old_table.tail_page_frame_index = table.tail_page_frame_index
-        self.old_table.merge_thread = table.merge_thread
-        self.old_table.path = table.path
-        self.old_table.index = Index(self.old_table)
-
-        self.table = table
         # use grades_table for aborting
+        self.table = table
 
         
     # If you choose to implement this differently this method must still return True if transaction commits or False on abort
@@ -57,7 +39,24 @@ class Transaction:
             if result == False:
                 return self.abort()
             # append recently added lock
-            self.lock_entries.append(list(self.table.lock_manager.locks.keys())[len(self.table.lock_manager.locks)-1])
+            self.lock_entries.append(self.table.recently_added_lock_entry)
+
+            # for insert abort
+            if not self.table.recently_inserted_rid:
+                self.rids_inserted.append(self.table.recently_inserted_rid.copy())
+                self.table.recently_inserted_rid = None
+            
+            # for update abort
+            if not self.table.recently_updated_rid:
+                self.rids_updated.append(self.table.recently_updated_rid.copy())
+                self.table.recently_updated_rid = None
+
+            # for delete abort
+            if not self.table.deleted_columns:
+                self.deleted.append(self.table.deleted_columns.copy())
+                self.table.deleted_columns = None
+            
+            self.num_queries_executed += 1
         return self.commit()
 
     
@@ -66,9 +65,28 @@ class Transaction:
         # release all locks just acquired
         for lock_entry in self.lock_entries:
             if lock_entry in self.table.lock_manager.locks.keys():
-                del self.table.lock_manager.locks[lock_entry]
-        for query in self.queries:
-            query.table = self.old_table
+                self.table.lock_manager.release_lock(lock_entry)
+
+        # roll-back
+        i = len(self.queries)-1
+        while self.num_queries_executed > 0:
+            query, args = self.queries[i]
+            new_query = Query(self.table)
+            if query == query.insert:
+                new_query.delete(self.rids_inserted.pop(len(self.rids_inserted)-1))
+            elif query == query.update:
+                new_query.delete(self.rids_updated.pop(len(self.rids_updated)-1))
+            elif query == query.delete:
+                version = len(self.deleted[len(self.deleted)-1])-1
+                new_query.insert(self.deleted[len(self.deleted)-1][version])
+                version -= 1
+                while not self.deleted:
+                    new_query.update(self.deleted[len(self.deleted)-1][version])
+                    version -= 1
+                self.deleted.pop(len(self.deleted)-1)
+
+            self.num_queries_executed -= 1
+            i -= 1
         self.run()
         return False
 
@@ -79,7 +97,7 @@ class Transaction:
         # release all locks
         for lock_entry in self.lock_entries:
             if lock_entry in self.table.lock_manager.locks.keys():
-                del self.table.lock_manager.locks[lock_entry]
+                self.table.lock_manager.release_lock(lock_entry)
 
         return True
 
