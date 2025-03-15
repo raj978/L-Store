@@ -7,7 +7,7 @@ Team Members:
 
 - Rajat
 - Zhongtian Yu
-- - Ethan
+- Ethan
 - Jacob
 
 <details>
