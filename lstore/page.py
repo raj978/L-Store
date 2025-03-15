@@ -6,6 +6,7 @@
 
 # for arrays and stuff
 from lstore.config import MAX_RECORDS_PER_PAGE, MAX_BASEPAGES_PER_RANGE, PAGE_SIZE
+import os
 
 
 # One Page for Every Column in Table (maybe 4k pages/columns per base page)
@@ -26,6 +27,48 @@ class Page:
         end = start + 8
         self.data[start:end] = int(value).to_bytes(8, byteorder='big', signed=True)
         self.num_records += 1
+
+    def read_from_disk(self, filepath, column_index=None):
+        """
+        Read page data from disk file
+        
+        :param filepath: Path to the file containing page data
+        :param column_index: Optional column index for multi-column files
+        """
+        try:
+            with open(filepath, 'rb') as file:
+                if column_index is not None:
+                    # If column index provided, seek to that column's offset
+                    file.seek(column_index * PAGE_SIZE)
+                    
+                data = file.read(PAGE_SIZE)
+                if data:
+                    self.data = bytearray(data)
+                    # Calculate number of records based on data size
+                    self.num_records = min(len(data) // 8, MAX_RECORDS_PER_PAGE)
+                return True
+        except Exception as e:
+            print(f"Error reading page from disk: {str(e)}")
+            return False
+            
+    def write_to_disk(self, filepath, data=None, column_index=None):
+        """
+        Write page data to disk file
+        
+        :param filepath: Path to the file to write the data
+        :param data: Optional data to write (uses self.data if None)
+        :param column_index: Optional column index for multi-column files
+        """
+        try:
+            with open(filepath, 'rb+' if os.path.exists(filepath) else 'wb') as file:
+                if column_index is not None:
+                    # If column index provided, seek to that column's offset
+                    file.seek(column_index * PAGE_SIZE)
+                file.write(data if data is not None else self.data)
+            return True
+        except Exception as e:
+            print(f"Error writing page to disk: {str(e)}")
+            return False
 
     def find_value(self, value):
         indexes = []

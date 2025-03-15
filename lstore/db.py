@@ -2,6 +2,7 @@ import array
 import os
 import pickle
 import struct
+from typing import Optional
 
 from lstore.bufferpool import *
 from lstore.table import Table
@@ -42,7 +43,7 @@ class Database:
                     tableName = entry
                     num_columns = arr[TABLENUMCOL]
                     table_key = arr[TABLEKEY]
-                    table = Table(tableName, num_columns, table_key, self.bufferpool, False, self.tables_path)
+                    table = Table(tableName, num_columns, table_key, self.bufferpool, False)
                     table.page_range_index = arr[TABLECURPG]
                     table.base_page_index = arr[TABLECURBP]
                     table.record_id = arr[TABLECURREC]
@@ -72,13 +73,13 @@ class Database:
                 pickle.dump(table.page_directory, file)
             metadata_path = self.path + f"/tables/{table.name}/metadata.bin"
             table.savemetadata(metadata_path)
-            table.bufferpool.close()
+            table.bufferpool.close(table.name)
 
     def create_table(self, name, num_columns, key_index):
         if self.bufferpool is None:
             self.open(self.path)
-        # self.bufferpool.start_table_dir(name, num_columns)
-        table = Table(name, num_columns, key_index, self.bufferpool, True, self.tables_path)
+        self.bufferpool.start_table_dir(name, num_columns)
+        table = Table(name, num_columns, key_index, self.bufferpool, True)
         self.tables.append(table)
         self.tablenames.append(name)
         return table

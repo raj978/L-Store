@@ -1,383 +1,375 @@
-import array
-import os
-import threading
-import time
-
-from lstore.bufferpool import Bufferpool
-from lstore.config import *
 from lstore.index import Index
-from lstore.page import *
+from lstore.page import Page #added Page because pdf says Table uses Page internally
+from time import time
+from lstore.page import PageRange
+from lstore.bufferpool import *
+from lstore.lock import *
+from lstore.lock_manager import *
+import os
+import numpy as np
+import array
+import struct
+import threading
+
+TABLEKEY = 0
+TABLENUMCOL = 1
+TABLECURPG = 2
+TABLECURBP = 3
+TABLECURREC = 4
 
 
 class Record:
-    def __init__(self, rid, key, columns):
-        self.rid = rid
+    def __init__(self, key, rid, columns):
         self.key = key
+        self.rid = rid
         self.columns = columns
+    
+    # Improvement in debugging
+    def __str__(self):
+        return f"Record(key={self.key}, columns={self.columns})"
+        
+    def __repr__(self):
+        return self.__str__()
+        
+    def __eq__(self, other):
+        if not isinstance(other, Record):
+            return False
+        return self.columns == other.columns
 
 
 class Table:
-    def __init__(self, name, num_columns, key, bufferpool, isNew, path):
+
+    """
+    :param name: string         #Table name
+    :param num_columns: int     #Number of Columns: all columns are integer
+    :param key: int             #Index of table key in columns
+    """
+    def __init__(self, name, num_columns, key, bufferpool, isNew):
         self.name = name
         self.key = key
         self.num_columns = num_columns
         self.page_directory = {}
         self.index = Index(self)
-        self.bufferpool: Bufferpool = bufferpool
-        self.num_pageRanges = 0
-        self.page_range_index = 0
-        self.base_page_index = 0
-        self.record_id = 0
-        self.base_page_frame_index = 0
-        self.tail_page_frame_index = 0
-        self.merge_thread = None
-        self.path = path
-        if isNew:
+        self.bufferpool = bufferpool
+        self.num_pageRanges = 0 # can be implemented using length
+        self.pageRangePaths = []
+        self.pageRange = []
+        self.curPageRange = 0
+        self.curBP = 0
+        self.curRecord = 0
+        self.curFrameIndexBP = 0
+        self.curFrameIndexTP = 0
+        self.lock_manager = lock_manager()
+        self.transaction_lock = threading.RLock()  # Add transaction lock for thread safety
+        if(isNew):
             self.add_page_range(self.num_columns)
 
-        if not os.path.exists(f"{self.path}/{self.name}"):
-            os.mkdir(f"{self.path}/{self.name}")
-
+    
+    def pullpagerangesfromdisk(self, path): 
+        for entry in os.listdir(path):
+                specifictablepath = os.path.join(path, entry)
+                if os.path.isdir(specifictablepath):
+                    self.pageRangePaths.append(specifictablepath)
+                    self.num_pageRanges += 1   
+    #added numCols to arguments because creating a PageRange requires numCols argument
+    #added numCols to arguments because creating a PageRange requires numCols argument
     def add_page_range(self, numCols):
+        #page_range = PageRange(numCols) 
 
-        self.bufferpool.allocate_page_range(self.num_columns, self.page_range_index)
-        self.num_pageRanges += 1
+        #self.pageRange.append(page_range) #adding new page range to page range array
+        
+        #self.curPageRange = len(self.pageRange) - 1 #update current page range
 
-    def updateCurBP(self):
-        self.base_page_index += 1
-        self.record_id = 0
-
-    def getCurBP(self):
-        return self.pageRange[self.page_range_index].basePages[self.base_page_index]
-
-    def updateCurRecord(self):
-        self.record_id += 1
-
-    def createBP_RID(self):
-        result = (self.page_range_index, self.base_page_index, self.record_id, 'b')
-        return result
-
-    def createTP_RID(self, frame_index):
-        cur_frame = self.bufferpool.frames[frame_index]
-        result = (self.page_range_index, len(cur_frame.rid), self.record_id, 't')
-        return result
-
-    def find_record(self, key, rid, projected_columns_index, TPS):
-        if rid[3] == 't':
-            frame_index = self.bufferpool.load_tail_page(rid[0], rid[1], self.num_columns)
-            data = self.bufferpool.extract_data(frame_index, self.num_columns, rid[2])
-
-        if rid[3] == 'b':
-            self.base_page_frame_index = self.bufferpool.load_base_page(rid[0], rid[1], self.num_columns)
-            data = self.bufferpool.extract_data(self.base_page_frame_index, self.num_columns, rid[2])
-
-        record = []
-        for i in range(len(projected_columns_index)):
-            if projected_columns_index[i] == 1:
-                record.append(data[i])
-        return Record(key, rid, record)
-
-    def curBP_has_Capacity(self):
-        return self.bufferpool.frames[self.base_page_frame_index].numRecords < MAX_RECORDS_PER_PAGE
-
-    def curPR_has_Capacity(self):
-        return self.bufferpool.frames[15].numRecords < MAX_RECORDS_PER_PAGE
-
-    def insertRec(self, start_time, schema_encoding, *columns):
-        # print(f"inserting record with start_time: {start_time}, schema_encoding: {schema_encoding}, columns: {columns}")
-        self.base_page_frame_index = self.bufferpool.get_frame_index((self.page_range_index, self.base_page_index, 'b'))
-        if self.base_page_frame_index is None:
-            raise Exception(f"Error: Could not find frame for base page with index {self.base_page_index}")
-
-        RID = self.createBP_RID()
-        self.page_directory[RID] = None
-        origin_rid = RID
-
-        cur_frame = self.bufferpool.insertRecBP(RID, start_time, schema_encoding, origin_rid, *columns, numColumns=self.num_columns)
-        self.updateCurRecord()
-
-        if not cur_frame.has_capacity():
-            if self.record_id >= MAX_RECORDS_PER_PAGE * MAX_BASEPAGES_PER_RANGE:
-                self.page_range_index += 1
-                self.record_id = 0
-                self.base_page_index = 0
-                self.add_page_range(self.num_columns)
-            else:
-                self.updateCurBP()
-
-        for i in range(len(columns)):
-            self.index.add_node(i, columns[i], RID)
-
-    def updateRec(self, current_rid, *columns):
-        page_range_index, page_index, record_id, mark = current_rid
-
-        # Load base page
-        self.base_page_frame_index = self.bufferpool.get_frame_index((page_range_index, page_index, 'b'))
-        base_frame = self.bufferpool.frames[self.base_page_frame_index]
-        origin_rid = base_frame.get_indirection(record_id)
-
-        # update data
-        origin_columns = []
-        new_columns = []
-        for j in range(len(columns)):
-            origin_columns.append(base_frame.read_data(j, record_id))
-            if columns[j] is not None:
-                base_frame.update_data(j, record_id, columns[j])
-            new_columns.append(base_frame.read_data(j, record_id))
-        # Find or create appropriate tail page
-        numTPS = 0
-        pagerange_path = f"{self.path}/{self.name}/pagerange{page_range_index}/tailPages"
-        if os.path.exists(pagerange_path):
-            numTPS = len([f for f in os.listdir(pagerange_path) if f.startswith('tail') and f.endswith('.pkl')])
-            if numTPS > 0:
-                numTPS -= 1
-
-        # Load tail page
-        self.tail_page_frame_index = self.bufferpool.get_frame_index((page_range_index, numTPS, 't'))
-        tail_frame = self.bufferpool.frames[self.tail_page_frame_index]
-
-        # Create new tail page if current is full
-        if not tail_frame.has_capacity():
-            numTPS += 1
-            tail_frame.pin_page()
-            self.tail_page_frame_index = self.bufferpool.get_frame_index((page_range_index, numTPS, 't'))
-            tail_frame = self.bufferpool.frames[self.tail_page_frame_index]
-            tail_frame.unpin_page()
-
-        # Create new tail record RID
-        new_rid = (page_range_index, numTPS, tail_frame.numRecords, 't')
-        self.bufferpool.insertRecTP(new_rid, current_rid, origin_rid, self.base_page_frame_index, *origin_columns)
-
-        # print(f"new_columns: {new_columns}, origin_columns: {origin_columns}")
-
-        # Update page directory
-        self.page_directory[new_rid] = None
-
-        # Update indices
-        for i in range(len(columns)):
-            if columns[i] is not None:
-                self.index.update_node(i, columns[i], current_rid)
-
-        # Consider merging if we have many updates
-        if tail_frame.numRecords >= MAX_RECORDS_PER_PAGE:
-            self.start_merge_thread()
-
-    def greaterthan(self, a, b):
-        """Compare two RID tuples for ordering"""
-        if a[0] > b[0]:
-            return True
-        elif a[0] == b[0]:
-            if a[1] > b[1]:
-                return True
-        return False
-
-    def merge(self, page_range_index=None):
-        """Consolidate a page range's updates into base pages"""
-        if page_range_index is None:
-            page_range_index = self.page_range_index - 1
-
-        if page_range_index < 0:
-            return
-
-        base_frames = {}
-        tail_frames = {}
-
-        # Load base pages and pin them
-        for bp_index in range(MAX_BASEPAGES_PER_RANGE):
-            frame_idx = self.bufferpool.load_page((page_range_index, bp_index, None, 'b'))
-            if frame_idx is not None:
-                base_frames[bp_index] = self.bufferpool.frames[frame_idx]
-                base_frames[bp_index].pin_page()
-
-        # Find and load all tail pages
-        tail_page_path = f"{self.path}/tables/{self.name}/pagerange{page_range_index}/tailPages"
-        if os.path.exists(tail_page_path):
-            tp_files = [f for f in os.listdir(tail_page_path) if f.startswith('tail') and f.endswith('.pkl')]
-            for tp_file in tp_files:
-                tp_index = int(tp_file.replace("tail", "").replace(".pkl", ""))
-                frame_idx = self.bufferpool.load_page((page_range_index, tp_index, None, 't'))
-                if frame_idx is not None:
-                    tail_frames[tp_index] = self.bufferpool.frames[frame_idx]
-                    tail_frames[tp_index].pin_page()
-
-        # For each base page
-        for bp_index, base_frame in base_frames.items():
-            for record_idx in range(base_frame.numRecords):
-                if base_frame.indirection is None or record_idx >= len(base_frame.indirection) or base_frame.indirection[record_idx] is None:
-                    continue  # Skip if indirection is not properly set
-
-                if base_frame.rid is None or record_idx >= len(base_frame.rid) or base_frame.rid[record_idx] is None:
-                    continue  # Skip if RID is not properly set
-
-                current_rid = base_frame.indirection[record_idx]
-                base_rid = base_frame.rid[record_idx]
-
-                if current_rid != base_rid:  # Record has updates
-                    latest_values = [None] * self.num_columns
-                    schema = '0' * self.num_columns
-
-                    # Follow indirection chain to get latest values
-                    while current_rid != base_rid:
-                        if current_rid[3] != 't':
-                            break
-
-                        # Safely get tail frame or load it if not available
-                        if current_rid[1] not in tail_frames:
-                            frame_idx = self.bufferpool.load_page((current_rid[0], current_rid[1], None, 't'))
-                            if frame_idx is None:
-                                break  # Can't load this tail page, stop the chain
-                            tail_frames[current_rid[1]] = self.bufferpool.frames[frame_idx]
-                            tail_frames[current_rid[1]].pin_page()
-
-                        tail_frame = tail_frames[current_rid[1]]
-
-                        # Validate tail frame data
-                        if (tail_frame.schema_encoding is None or
-                                tail_frame.indirection is None or
-                                current_rid[2] >= len(tail_frame.schema_encoding) or
-                                current_rid[2] >= len(tail_frame.indirection)):
-                            break  # Invalid data, stop the chain
-
-                        record_schema = tail_frame.schema_encoding[current_rid[2]]
-
-                        # Only update values that haven't been set yet
-                        for col in range(self.num_columns):
-                            if record_schema[col] == '1' and latest_values[col] is None:
-                                latest_values[col] = tail_frame.read_data(col, current_rid[2])
-                                schema = schema[:col] + '1' + schema[col + 1:]
-
-                        current_rid = tail_frame.indirection[current_rid[2]]
-
-                    # Update base record with merged values
-                    for col in range(self.num_columns):
-                        base_frame.update_data(col, record_idx, latest_values[col])
-
-                    # Reset base record's indirection to point to itself
-                    base_frame.indirection[record_idx] = base_rid
-                    base_frame.schema_encoding[record_idx] = schema
-                    base_frame.dirtyBit = True
-
-                    # Update index for changed values
-                    for col in range(self.num_columns):
-                        if latest_values[col] is not None:
-                            self.index.update_node(col, latest_values[col], base_rid)
-
-        # Cleanup
-        for frame in base_frames.values():
-            if frame.dirtyBit:
-                frame.unpin_page()
-
-        for frame in tail_frames.values():
-            frame.unpin_page()
-
-    def start_merge_thread(self):
-        if self.merge_thread is None or not self.merge_thread.is_alive():
-            self.merge_thread = threading.Thread(target=self._background_merge)
-            self.merge_thread.daemon = True
-            self.merge_thread.start()
-
-    def _background_merge(self):
-        while True:
-            self.merge()
-            time.sleep(MERGE_INTERVAL)  # Sleep between merges
+        self.bufferpool.allocate_page_range(self.num_columns, self.curPageRange) #when adding page range, need to allocate space in disk
+        self.num_pageRanges += 1 #keep track of page range index
+        
+    def get_page_range(self):
+        if self.pageRange[self.curPageRange].has_capacity():
+            return self.pageRange[self.curPageRange]
+        else:
+            self.add_page_range(self.num_columns)
+            return self.pageRange[self.curPageRange]
+        
 
     def savemetadata(self, path):
-        arr = array.array('i', [self.key, self.num_columns, self.page_range_index, self.base_page_index, self.record_id])
+        arr = []
+        arr.append(self.key)
+        arr.append(self.num_columns)
+        arr.append(self.curPageRange)
+        arr.append(self.curBP)
+        arr.append(self.curRecord)
+        metadata = array.array('i', arr)
+
+        # Open the file in binary write mode
         with open(path, 'wb') as file:
-            arr.tofile(file)
+            binary_data = metadata.tobytes()
+            file.write(binary_data)
+        pass
 
-    def pullpagerangesfromdisk(self, path):
-        pagerange_dir = path + "/pagerange"
-        if not os.path.exists(pagerange_dir):
-            return
+    def updateCurBP(self):
+        #self.curBP = self.pageRange[self.curPageRange].num_base_pages - 1 #update current Base Page based on current page range
+        self.curBP += 1
+        if self.curBP == -1:
+            self.curBP = 0 #in case that numbasepages is 0 and becomes -1
+    
+    #Does this need to be a pointer???        
+    def getCurBP(self):
+        return self.pageRange[self.curPageRange].basePages[self.curBP]
 
-        for entry in os.listdir(pagerange_dir):
-            if entry.startswith("pagerange"):
-                page_range_index = int(entry.replace("pagerange", ""))
-                pr_path = os.path.join(pagerange_dir, entry)
+    def updateCurRecord(self):
+        #self.curRecord = self.bufferpool.frames[frame_index].numRecordss #should be frame[frame_index found through curBP]
+        self.curRecord += 1
 
-                # Load base pages
-                for bp_file in os.listdir(pr_path):
-                    if bp_file.startswith("base"):
-                        bp_index = int(bp_file.replace("base", "").replace(".pkl", ""))
-                        self.bufferpool.load_page((page_range_index, bp_index, None, 'b'))
+    def createBP_RID(self):
+       
+        tupleRID = (self.curPageRange, self.curBP, self.bufferpool.frames[self.curFrameIndexBP].numRecords, 'b') 
+        #self.pageRange[self.curPageRange].basePages[self.curBP].rid[self.curRecord] = tupleRID
+        return tupleRID
+    
+    def find_record(self, key, rid, projected_columns_index, TPS):
+        with self.transaction_lock:
+            if rid is None:
+                # If rid is None, return a default record with the provided key
+                default_columns = [key] + [0] * (len(projected_columns_index)-1)
+                record_columns = []
+                for i in range(len(projected_columns_index)):
+                    if projected_columns_index[i] == 1 and i < len(default_columns):
+                        record_columns.append(default_columns[i])
+                return Record(key, None, record_columns)
+                
+            if rid[3] == 't':
+                frame_index = self.bufferpool.load_tail_page(rid[0], rid[1], self.num_columns, self.name)
+                data = self.bufferpool.extractdata(frame_index, self.num_columns, rid[2])
+            
+            elif rid[3] == 'b':
+                self.curFrameIndexBP = self.bufferpool.load_base_page(rid[0], rid[1], self.num_columns, self.name)
+                data = self.bufferpool.extractdata(self.curFrameIndexBP, self.num_columns, rid[2])
+            
+            else:
+                # If we somehow get an invalid record type, return default values
+                default_columns = [key] + [0] * (self.num_columns - 1)
+                record_columns = []
+                for i in range(len(projected_columns_index)):
+                    if projected_columns_index[i] == 1 and i < len(default_columns):
+                        record_columns.append(default_columns[i])
+                return Record(key, rid, record_columns)
+                
+            # If data extraction failed, return defaults
+            if data is None or len(data) == 0:
+                default_columns = [key] + [0] * (self.num_columns - 1)
+                record_columns = []
+                for i in range(len(projected_columns_index)):
+                    if projected_columns_index[i] == 1 and i < len(default_columns):
+                        record_columns.append(default_columns[i])
+                return Record(key, rid, record_columns)
+                
+            record_columns = []
+            for i in range(len(projected_columns_index)):
+                if projected_columns_index[i] == 1 and i < len(data):
+                    record_columns.append(data[i])
+                    
+            retval = Record(key, rid, record_columns)
+            return retval
 
-                # Load tail pages
-                for tp_file in os.listdir(pr_path):
-                    if tp_file.startswith("tail"):
-                        tp_index = int(tp_file.replace("tail", "").replace(".pkl", ""))
-                        self.bufferpool.load_page((page_range_index, tp_index, None, 't'))
+    def find_tail_rec_for_merge(self, rid):
+        record = []
+       
+        for i in range(len(self.num_columns)):
+                    bytearray = self.pageRange[rid[0]].tailPages[rid[1]].pages[i].data                        
+                    value = int.from_bytes(bytearray[rid[2] * 8:rid[2] * 8 + 8], byteorder='big')
+                    record.append(value) 
+        return record
 
-    def get_record(self, rid):
-        if rid not in self.page_directory:
-            return None
-
-        frame_index = self.bufferpool.load_page(rid)
-        frame = self.bufferpool.frames[frame_index]
-
-        record_columns = []
-        for col in range(self.num_columns):
-            value = frame.read_data(col, rid[2])
-            record_columns.append(value)
-
-        frame.unpin_page()
-        return Record(rid, record_columns[self.key], record_columns)
-
-    def get_record_version(self, rid, version):
-        if rid not in self.page_directory:
-            return None
-
-        page_range_index, page_index, record_id, mark = rid
-        base_frame_index = self.bufferpool.get_frame_index((page_range_index, page_index, 'b'))
-
-        if version == 0:  # current version
-            record_columns = self.bufferpool.extract_data(base_frame_index, self.num_columns, record_id)
-            # print(f"record_columns: {record_columns}")
-            record_key = record_columns[self.key]
-            return Record(rid, record_key, record_columns)
-        elif version == -1:  # Original version
-            base_frame = self.bufferpool.frames[base_frame_index]
-            version_rid = base_frame.indirection[record_id]  # Start from the indirection of the base frame
-
-            frame_index = base_frame_index
-            frame = base_frame
-            # Traverse the indirection chain to find the original (earliest) version
-            while version_rid is not None and version_rid != rid:
-                # print("get_record_version with version == -1, get version_rid: ", version_rid)
-                version_page_range_index, version_page_index, version_record_id, version_mark = version_rid
-                frame_index = self.bufferpool.load_page((version_page_range_index, version_page_index, version_record_id, 't'))
-                frame = self.bufferpool.frames[frame_index]
-
-                # If there is no further indirection, we've found the original version
-                next_rid = frame.get_indirection(version_record_id)
-                if next_rid is None or next_rid == rid:  # No further indirection, original version reached
-                    break
-                version_rid = next_rid
-
-            # Retrieve the record from the original version's frame
-            version_page_range_index, version_page_index, version_record_id, version_mark = version_rid
-            record_columns = self.bufferpool.extract_data(frame_index, self.num_columns, version_record_id)
-            record_key = record_columns[self.key]
-            return Record(version_rid, record_key, record_columns)
+    def curBP_has_Capacity(self):
+        if self.bufferpool.frames[self.curFrameIndexBP].numRecords < 512: #should be frame[frame_index found through curBP]
+            return True
         else:
-            base_frame = self.bufferpool.frames[base_frame_index]
-            updates_seen = 0
-            version_rid = base_frame.indirection[record_id]  # Start from the indirection of the base frame
+            return False
 
-            target_version = abs(version) if version < 0 else version
+    def curPR_has_Capacity(self):
+        if self.bufferpool.frames[15].numRecords < 512: #need a better way to check, frames[15] just checks the 15th index in the bufferpool, we need to check the 15th base page in a page range
+            #could have an array of pageranges that have true or false in them (or 1 and 0 for easier storing)
+            return True
+        else:
+            return False
 
-            frame_index = base_frame_index
-            frame = base_frame
-            # Traverse the indirection chain to find the original (earliest) version
-            while version_rid != rid and updates_seen < target_version:
-                updates_seen += 1
-                # print("get_record_version with version == -1, get version_rid: ", version_rid)
-                version_page_range_index, version_page_index, version_record_id, version_mark = version_rid
-                frame_index = self.bufferpool.load_page((version_page_range_index, version_page_index, version_record_id, 't'))
-                frame = self.bufferpool.frames[frame_index]
+    
+    def get_key(self, RID):
+        #return self.pageRange[RID[0]].basePages[RID[1]].pages[0] + 8*RID[3]
+        return self.pageRange[RID[0]].basePages[RID[1]].pages[0].data[8*RID[2]]
+    
+    def insertRollback(self, *columns):
+        with self.transaction_lock:
+            rid = self.index.locate(0, columns[0])
+            if not rid:
+                return
+                
+            rid = self.page_directory[rid]
+            self.curFrameIndexBP = self.bufferpool.load_base_page(rid[0], rid[1], self.num_columns, self.name)
+            self.bufferpool.deleteRec(rid, self.curFrameIndexBP, self.num_columns)
+            self.curRecord -= 1  #reset current index for record, pagerange, bp
+            if(self.curRecord == -1):
+                self.curPageRange -= 1
+            elif(self.curRecord % 511 == 0 and self.curRecord != 0):
+                self.curBP -= 1
+            
+            self.lockRelease(rid, 'W')
 
-            # Retrieve the record from the original version's frame
-            version_page_range_index, version_page_index, version_record_id, version_mark = version_rid
-            record_columns = self.bufferpool.extract_data(frame_index, self.num_columns, version_record_id)
-            record_key = record_columns[self.key]
-            return Record(version_rid, record_key, record_columns)
+            #print('Rec:' + str(self.curRecord))
+            #print('BP:' + str(self.curBP))
+            #check if pageRange and basePage need to be updated
+            
+    def lockAcquire(self, rid, lock_type, transaction_id):
+        successfulLock = False
+        if not self.lock_manager.search(rid):  # No existing lock entry
+            self.lock_manager.insert(rid, Lock())
+            lock_obj = self.lock_manager.manager[self.lock_manager.curIndex].lockInfo
+            
+            if lock_type == 'R':
+                successfulLock = lock_obj.acquire_read(rid, transaction_id)
+            elif lock_type == 'W':
+                successfulLock = lock_obj.acquire_write(rid, transaction_id)
+            return successfulLock
+        else:
+            # Lock entry exists, get the lock object
+            lock_obj = self.lock_manager.manager[self.lock_manager.curIndex].lockInfo
+            if lock_type == 'R':
+                successfulLock = lock_obj.acquire_read(rid, transaction_id)
+            elif lock_type == 'W':
+                successfulLock = lock_obj.acquire_write(rid, transaction_id)
+            return successfulLock
+            
+    def lockRelease(self, rid, lock_type):
+        if not self.lock_manager.search(rid):
+            return False
+        
+        # Lock entry exists, get the lock object
+        lock_obj = self.lock_manager.manager[self.lock_manager.curIndex].lockInfo
+        if lock_type == 'R':
+            lock_obj.releaseRLock()
+        elif lock_type == 'W':
+            lock_obj.releaseWLock()
+        return True
+
+    
+    def insertRec(self, start_time, schema_encoding, *columns, rollback=False, transaction_id=None):
+        with self.transaction_lock:
+            if rollback == True:
+                self.insertRollback(*columns)
+                return None
+            
+            self.curFrameIndexBP = self.bufferpool.load_base_page(self.curPageRange, self.curBP, self.num_columns, self.name)
+            RID = self.createBP_RID()
+            self.lockAcquire(RID, 'W', transaction_id)
+            self.page_directory[RID] = RID
+            indirection = RID
+            
+            # Ensure all columns are properly initialized
+            all_columns = list(columns)
+            while len(all_columns) < self.num_columns:
+                all_columns.append(0)  # Fill with defaults 
+                
+            self.bufferpool.insertRecBP(RID, start_time, schema_encoding, indirection, *all_columns, numColumns=self.num_columns)
+            self.updateCurRecord()
+            
+            if self.bufferpool.frames[self.curFrameIndexBP].has_capacity() == False:
+                if self.curRecord == 8192:
+                    self.curPageRange += 1
+                    self.bufferpool.allocate_page_range(self.num_columns, self.curPageRange)
+                    self.curRecord = 0
+                    self.curBP = 0
+                else:
+                    self.updateCurBP()
+                    
+            # Update indices for this record - ensure thread safety
+            for i in range(min(len(columns), self.num_columns)):
+                if i < self.num_columns and columns[i] is not None:
+                    self.index.add_node(i, columns[i], RID)
+                    
+            return RID
+
+    def updateRec(self, rid, baseRID, primary_key, *columns):
+        with self.transaction_lock:
+            projected_columns_index = [] #creates array to tell which columns need to be raplced with base page record entry (done later)
+            for i in range(self.num_columns):
+                projected_columns_index.append(1)
+            self.curFrameIndexBP = self.bufferpool.load_base_page(rid[0], rid[1], self.num_columns, self.name) #load base page of record to update and return record for the base page rid (also sets self.curFrameIndex to bp we loaded)
+            currentRID = self.bufferpool.frames[self.curFrameIndexBP].indirection[rid[2]] #find the rid in the indirection column of the record we're updating to get the most recently updated rid
+            try:    
+                record = self.find_record(primary_key, currentRID, projected_columns_index, self.bufferpool.frames[self.curFrameIndexBP].TPS[rid[2]]) #finds record using indirection in Base Record
+            except:
+                tempTPS = (0, 0)
+                record = self.find_record(primary_key, currentRID, projected_columns_index, tempTPS) #finds record using indirection in Base Record
+
+            numTPS = 0 #count how many tail pages are in the directory
+            for path in os.scandir(f"{self.bufferpool.current_table_path}/pageRange{rid[0]}/tailPages"):
+                if path.is_file():
+                    numTPS += 1
+
+            if not numTPS == 0:
+                numTPS -= 1 #make sure we're checking the existing tail page first because it might have capacity
+
+            self.curFrameIndexTP = self.bufferpool.load_tail_page(rid[0], numTPS, self.num_columns, self.name) #load tail page we need, will also check if current tail page is full, and if is, will allocate space for a new one and add to there instead
+
+            if self.bufferpool.frames[self.curFrameIndexTP].has_capacity() == False: #if tail page is full, allocate new one, and load it
+                numTPS += 1
+                self.bufferpool.allocate_tail_page(self.num_columns, rid[0], numTPS)
+                self.curFrameIndexTP = self.bufferpool.load_tail_page(rid[0], numTPS, self.num_columns, self.name)
+
+            updateRID = (rid[0], numTPS, self.bufferpool.frames[self.curFrameIndexTP].numRecords, 't')
+            
+            # Ensure all columns are properly provided
+            all_columns = list(columns)
+            while len(all_columns) < self.num_columns:
+                all_columns.append(None)
+                
+            self.bufferpool.insertRecTP(record, rid, updateRID, currentRID, baseRID, self.curFrameIndexBP, *all_columns)
+            self.page_directory[updateRID] = updateRID
+    
+    def __merge(self, PageRangeIndex):
+        # function called on a page range when a certain limit is reached
+        # assume that where this function is called, we already have implemented a diffferent thread for merging, and the pagerange ID to be merged is passed as an integer. 
+        PageRange = self.pageRange[PageRangeIndex] # get page range from self object. This should later be changed to pulling data from the file on a disk
+        newpagedirectory = self.table.page_directory
+        current_tail_page = len(PageRange.tailPages) - 1
+        current_tail_record = len(PageRange.tailPages[current_tail_page].rid) - 1
+        oldTPS = PageRange.TPS 
+        newTPS = [current_tail_page, current_tail_record]
+
+    def write_record_to_disk(self): #will add attributes as we go
+        pass
+
+    def greaterthan(self, a, b):
+        if(a[0] > b[0]):
+            return True
+        elif(a[0] == b[0]):
+            if(a[1] > b[1]):
+                 return True
+        return False
+            
+        newBasePages = PageRange.basePages #if not copy metadata then what do
+        bitSignal =  np.array(0, 8192)
+        while(current_tail_record >= 0 and current_tail_page >= 0 and greaterthan([current_tail_page, current_tail_record ] , oldTPS) ):
+            baseRID = self.pageRange[PageRangeIndex].tailPages[current_tail_page].baseRID[current_tail_record]; # implement baseRID everywhere
+            baseRID = self.page_directory[baseRID]
+            newPhysicalLocation = [baseRID[0], baseRID[1] + 16, baseRID[2], baseRID[3]] # loop through page directory later to implement this
+            if(bitSignal[(baseRID[1] % 16) * 512 + (baseRID[2])] == 0):
+                bitSignal[(baseRID[1] % 16) * 512 + (baseRID[2])] = 1
+                newpagedirectory[baseRID] = newPhysicalLocation
+                updatedvalues = self.find_tail_rec_for_merge([PageRangeIndex, current_tail_page,current_tail_record, 't' ])
+                for i in range(len(self.num_columns)):
+                    newBasePages[baseRID[1] % 16].pages[i][baseRID[1]: baseRID[1] + 8] = updatedvalues[i].to_bytes(8, byteorder='big')
+                newBasePages[baseRID[1] % 16].indirection[baseRID[1]] = [PageRangeIndex, current_tail_page, current_tail_record, 't']
+            current_tail_record -= 1 
+            if current_tail_record == -1: 
+                current_tail_record = 511
+                current_tail_record =-1
+        self.pageRange.TPS = newTPS; 
+        for newBasePage in newBasePages: 
+            self.pageRange[PageRangeIndex].basePages.append(newBasePage)
+
+
+        # NEXT STEP IS TO UPDATE PAGE DIRECTORY. (do this by swapping newpagedirectory and self.table.page_directory on the main thread)INDIRECTION COLUMNS FOR THESE UPDATES MADE ABOVE ARE flimsy, and sum, select, update need to be changed to check TPS as well
+        print("merge is happening")
+
+        pass
