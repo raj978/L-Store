@@ -4,11 +4,11 @@ Team DBDevelopers
 
 Team Members:
 
-- Jacob
+
 - Rajat
-- Mahdi
-- Ethan
 - Zhongtian Yu
+- Ethan
+- Jacob
 
 <details>
   <summary><h1>Milestone 1 (20%)</h1>
