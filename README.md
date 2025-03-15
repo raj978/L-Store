@@ -6,7 +6,6 @@ Team Members:
 
 - Jacob
 - Rajat
-- Mahdi
 - Ethan
 - Zhongtian Yu
 
